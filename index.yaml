@@ -1,0 +1,15 @@
+apiVersion: v1
+entries:
+  k8gb-ui:
+  - apiVersion: v2
+    appVersion: 0.1.0
+    created: "2026-10-26T04:38:20.183233138Z"
+    description: Multi-cluster k8gb console, site agent and optional Traefik adapter
+    digest: 16051a7deac08a4ecac3443a77bed91cfb63c0e55d7439698571e18fd2340ff6
+    kubeVersion: '>=1.26.0-0'
+    name: k8gb-ui
+    type: application
+    urls:
+    - k8gb-ui-0.1.0.tgz
+    version: 0.1.0
+generated: "2026-10-26T04:38:20.183246122Z"
