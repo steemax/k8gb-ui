@@ -13,24 +13,56 @@ A two-site tour with real k8gb, DNS and Traefik:
 - Preview changes across clusters, exclude and restore sites, override and reset IPs.
 - Configure mTLS and DNS SAN authorization, scope access with RBAC, and inspect audit history.
 
-[![Watch the k8gb-ui demo](docs/media/demo-preview.jpg)](docs/media/k8gb-ui-demo.mp4)
-
-[Watch the full demo](docs/media/k8gb-ui-demo.mp4) (2:40, 1080p, English captions, no audio)
-or browse the [chapter list](docs/media/chapters.md).
-
-<details>
-<summary>DNS policy animation: round robin, weights, failover and GeoIP</summary>
-
 <img src="docs/media/dns-balancing-animation.gif" alt="Animated DNS policy models showing round robin, weighted round robin, failover and recovery, and GeoIP" width="360">
 
-Illustrative models respond to the current form; they are not live traffic telemetry.
-The full demo also includes real DNS, certificate and access-control checks.
+**Animated DNS policies:** round robin, weights, failover/recovery and GeoIP.
+The GIF plays inline; the models are illustrative, not live traffic telemetry.
 
-</details>
+[Watch the full demo](docs/media/k8gb-ui-demo.mp4) (2:40, 1080p, English captions, no audio)
+or browse the [chapter list](docs/media/chapters.md). The full demo also includes
+real DNS, certificate and access-control checks.
+
+## Install in Kubernetes
+
+The published Helm repository is **<https://steemax.github.io/k8gb-ui/>**.
+No local image build is required. k8gb and its CRDs must already be installed in
+each participating cluster; Traefik is optional for native Gslb management.
+
+```sh
+helm repo add k8gb-ui https://steemax.github.io/k8gb-ui/
+helm repo update k8gb-ui
+helm search repo k8gb-ui/k8gb-ui --versions
+```
+
+Install an agent in **each** cluster. Console can run in one or all sites and
+connects to every agent over verified HTTPS. Start read-only, then explicitly
+enable administrator writes and, if needed, the IngressRoute webhook.
+
+Follow the [two-cluster installation guide](docs/installation.md) to prepare
+Secrets, HTTPS endpoints and the private values files used below. It covers
+built-in users without Keycloak, OIDC, shared audit and the optional webhook.
+There is no usable default password, and a bare `helm install` intentionally
+refuses an unconfigured deployment.
+
+After preparing those files, an agent installation uses the **published chart**:
+
+```sh
+helm --kube-context "$EAST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
+  --version 0.1.0 --namespace k8gb-ui --create-namespace \
+  -f "$PRIVATE/agent.yaml" \
+  --set-string agent.clusterID=east \
+  --set-string agent.ingress.host=east-agent.example.test \
+  --wait --timeout 5m
+```
+
+Repeat for the other site with its context, cluster ID and agent hostname. The
+guide includes both commands and the Console/write/webhook upgrade steps.
+Replace all `.example.test` names with your own DNS names.
 
 ## Deployment
 
-See the [Helm chart and profiles](charts/k8gb-ui/README.md) for installation.
+See the [Helm chart reference and profiles](charts/k8gb-ui/README.md) for all values,
+RBAC boundaries and compatibility limits.
 Images use one Docker Hub repository, `steemax/k8gb-ui`, with component tags:
 
 | Component | Image |
@@ -39,9 +71,9 @@ Images use one Docker Hub repository, `steemax/k8gb-ui`, with component tags:
 | Site agent | `steemax/k8gb-ui:0.1.0-agent` |
 | Optional webhook | `steemax/k8gb-ui:0.1.0-webhook` |
 
-Publish the images before installing the corresponding chart version. The
-[release guide](docs/releases.md) covers local builds, Docker Hub and the
-GitHub Pages chart repository. For an isolated end-to-end environment, use the
+The matching 0.1.0 images and chart are published. The maintainer
+[release guide](docs/releases.md) covers local builds, Docker Hub and publishing
+new chart versions. For an isolated end-to-end environment, use the
 [two-site DNS/auth lab](tests/dns-lab/README.md).
 
 ## Features

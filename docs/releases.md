@@ -88,6 +88,16 @@ contains `index.yaml` and chart `.tgz` packages, not application source or secre
 The [official Helm chart releaser](https://helm.sh/docs/howto/chart_releaser_action/)
 maintains the index and preserves older chart versions.
 
+The published project repository is <https://steemax.github.io/k8gb-ui/>.
+For deployment rather than publication, use the
+[Kubernetes installation guide](installation.md).
+
+GitHub may show a **"gh-pages had recent pushes" / "Compare & pull request"**
+banner after chart publication. This is a branch-comparison suggestion, not a
+failure or a required release step. Do not merge `gh-pages` into `main`: the
+branches intentionally contain different artifacts. Update source documentation
+on `main`; publish chart packages through the workflow.
+
 One-time setup after creating the actual GitHub repository:
 
 1. Create an empty `gh-pages` branch with an empty `.nojekyll` file. Keep this
@@ -126,12 +136,12 @@ git worktree remove "$pages_dir"
 Run this only once, if `gh-pages` does not already exist. Protect the
 `github-pages` environment so only the source default branch can deploy.
 
-GitHub supplies the actual owner/repository through `GITHUB_REPOSITORY`; nothing
-is hard-coded to a GitHub account. After Pages finishes deploying, substitute
-your actual identity below:
+GitHub supplies the actual owner/repository through `GITHUB_REPOSITORY`; the
+workflow also works in forks. After Pages finishes deploying, verify this
+project's repository below (substitute your own URL when publishing a fork):
 
 ```sh
-helm repo add k8gb-ui https://GITHUB_OWNER.github.io/GITHUB_REPOSITORY/
+helm repo add k8gb-ui https://steemax.github.io/k8gb-ui/
 helm repo update
 helm search repo k8gb-ui/k8gb-ui --versions
 helm upgrade --install ui k8gb-ui/k8gb-ui --version 0.1.0 \
