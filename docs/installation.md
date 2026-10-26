@@ -10,6 +10,23 @@ Replace the contexts, GeoTags, namespace, controller locator, ingress class and
 all `.example.test` names with your own. The commands use the published **0.1.0**
 chart and Docker Hub images, not a local build.
 
+## Choose your deployment
+
+First select **where Console runs**, then independently choose **native or
+IngressRoute-managed GSLB**. See [deployment options](deployment-options.md) for
+diagrams and the benefits/limits of each management mode.
+
+| Choice | Console in east | Console in west | Agents | Optional Traefik webhook |
+| --- | --- | --- | --- | --- |
+| **A: one Console site** | Yes | No | Both sites | Enable in each site that manages IngressRoutes, or leave disabled |
+| **B: distributed Console sites** | Yes | Yes | Both sites | Same independent choice as A |
+
+The commands below support both options through `CONSOLE_IN_WEST`. Start with A
+by setting it to `false`; set it to `true` for B. This controls Console placement,
+not agent deployment. Both Consoles use one public origin,
+`https://gslb.apps.example.test`, in option B. Publishing that hostname through
+k8gb is a separate bootstrap step, not a side effect of installing the chart.
+
 ## 1. Prerequisites and topology
 
 - Kubernetes 1.26+ with working k8gb, its CRDs and DNS in each site. The current
@@ -26,8 +43,8 @@ chart and Docker Hub images, not a local build.
 
 | Site | Agent URL | Console URL |
 | --- | --- | --- |
-| east | `https://east-agent.example.test` | `https://gslb.example.test` |
-| west | `https://west-agent.example.test` | Same hostname, if deployed in both sites |
+| east | `https://east-agent.example.test` | `https://gslb.apps.example.test` |
+| west | `https://west-agent.example.test` | Same hostname in option B; no Console in option A |
 
 Both agents must be reachable from every Console replica, including across sites.
 Restrict agent ingress and HTTP backends to trusted Console traffic with your
@@ -42,6 +59,8 @@ Choose context names from `kubectl config get-contexts`, then set:
 export EAST_CONTEXT=your-east-context
 export WEST_CONTEXT=your-west-context
 export PRIVATE="$HOME/.config/k8gb-ui-install"
+# A: false (one Console site); B: true (Consoles in both sites).
+export CONSOLE_IN_WEST=false
 umask 077
 mkdir -p "$PRIVATE/east" "$PRIVATE/west"
 chmod 700 "$PRIVATE"
@@ -183,11 +202,15 @@ users:
     groups: [team-catalog]
 ```
 
-Provision `ui-tls` in `k8gb-ui` on each Console site for `gslb.example.test`, as
-with `agent-tls` above. Create these additional Secrets in each Console cluster:
+Provision `ui-tls` in `k8gb-ui` on each Console site for `gslb.apps.example.test`,
+as with `agent-tls` above. A needs these Console Secrets only in east; B needs
+them in both sites. The loop respects the selected placement:
 
 ```sh
 for context in "$EAST_CONTEXT" "$WEST_CONTEXT"; do
+  if [ "$context" = "$WEST_CONTEXT" ] && [ "$CONSOLE_IN_WEST" != true ]; then
+    continue
+  fi
   kubectl --context "$context" -n k8gb-ui create secret generic ui-auth \
     --from-file=users.yaml="$PRIVATE/users.yaml" \
     --from-file=session-key="$PRIVATE/session-key"
@@ -214,7 +237,7 @@ console:
   authSecretName: ui-auth
   auth:
     mode: builtin
-    publicURL: https://gslb.example.test
+    publicURL: https://gslb.apps.example.test
     usersFile: /run/auth/users.yaml
     cookieKeyFile: /run/auth/session-key
     bindings:
@@ -241,13 +264,14 @@ console:
   ingress:
     enabled: true
     className: your-ingress-class
-    host: gslb.example.test
+    host: gslb.apps.example.test
     tlsSecretName: ui-tls
 ```
 
 Set `zones` to your actual k8gb-served domains. Upgrade the same release, retaining
-the agent values. For Console only in east, skip the second command and do not
-publish its hostname to west.
+the agent values. The west command explicitly overrides `console.enabled`, so A
+keeps an agent-only west deployment while B also starts Console there. Both
+options still install agents in both sites.
 
 ```sh
 helm --kube-context "$EAST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
@@ -257,11 +281,18 @@ helm --kube-context "$EAST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
 helm --kube-context "$WEST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
   --version 0.1.0 -n k8gb-ui -f "$PRIVATE/agent.yaml" -f "$PRIVATE/console.yaml" \
   --set-string agent.clusterID=west \
-  --set-string agent.ingress.host=west-agent.example.test --wait --timeout 5m
+  --set-string agent.ingress.host=west-agent.example.test \
+  --set console.enabled="$CONSOLE_IN_WEST" --wait --timeout 5m
 ```
 
 Point the Console hostname to your intended ingress endpoint(s), then open
-`https://gslb.example.test`. Admin and reader should see only permitted namespaces;
+`https://gslb.apps.example.test`. A publishes only east; B can publish both
+Console sites through the same k8gb hostname using the
+[shared-hostname bootstrap](deployment-options.md#publish-console-through-its-own-gslb).
+The example uses native Gslb publication for Console itself, regardless of
+whether applications use native mode or the optional Traefik webhook.
+
+Admin and reader should see only permitted namespaces;
 **all mutations are still disabled**. Plain HTTP port-forwarding is not a supported
 login path because authenticated sessions use Secure cookies.
 
@@ -299,7 +330,10 @@ agent:
 ```
 
 Rerun the two upgrade commands in step 4, adding `-f "$PRIVATE/writes.yaml"`
-**after** the other values files. Only explicit `role: admin` bindings can write;
+**after** the other values files and keeping
+`--set console.enabled="$CONSOLE_IN_WEST"` on west. A keeps Console disabled in
+west while enabling its agent writes; B enables both Console and agent writes.
+Only explicit `role: admin` bindings can write;
 the reader remains read-only. Changes use preview/confirmation and have per-site
 results, not an atomic distributed transaction.
 
@@ -362,7 +396,8 @@ helm --kube-context "$WEST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
   -f "$PRIVATE/writes.yaml" -f "$PRIVATE/traefik.yaml" \
   --set-file webhook.caBundle="$PRIVATE/webhook-ca.b64" \
   --set-string agent.clusterID=west \
-  --set-string agent.ingress.host=west-agent.example.test --wait --timeout 5m
+  --set-string agent.ingress.host=west-agent.example.test \
+  --set console.enabled="$CONSOLE_IN_WEST" --wait --timeout 5m
 ```
 
 Admission validates without creating derived resources, including on dry-run.
@@ -379,7 +414,9 @@ for context in "$EAST_CONTEXT" "$WEST_CONTEXT"; do
   helm --kube-context "$context" status ui -n k8gb-ui
   kubectl --context "$context" -n k8gb-ui get pods,svc,ingress
   kubectl --context "$context" -n k8gb-ui rollout status deployment/k8gb-ui-agent
-  kubectl --context "$context" -n k8gb-ui rollout status deployment/k8gb-ui-console
+  if [ "$context" != "$WEST_CONTEXT" ] || [ "$CONSOLE_IN_WEST" = true ]; then
+    kubectl --context "$context" -n k8gb-ui rollout status deployment/k8gb-ui-console
+  fi
 done
 ```
 
@@ -390,7 +427,8 @@ preview lists the intended sites. Test against a disposable service first and
 query your actual k8gb DNS servers before and after each traffic change.
 
 For every upgrade keep the **complete** chosen values files and per-site
-overrides; omitting the write/webhook overlay can disable components. Do not
+overrides, including the Console placement flag; omitting the write/webhook
+overlay can disable components. Do not
 rerun the bootstrap credential/journal commands on ordinary upgrades. Auth,
 connection and signing Secret changes require deliberate Deployment restarts.
 Never overwrite a published chart or image version. Helm rollback does not

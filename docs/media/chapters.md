@@ -1,5 +1,9 @@
 # k8gb-ui demo
 
+[Quick interface overview](k8gb-ui-overview.gif) (0:40, looping GIF, English
+captions): resources, native/webhook creation, DNS policies and change previews,
+site/IP controls, mTLS, audit, RBAC and themes.
+
 [Watch the full demo](k8gb-ui-demo.mp4) (2:40, 1080p, English captions, no audio).
 
 | Time | Feature |

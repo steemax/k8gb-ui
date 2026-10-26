@@ -5,6 +5,42 @@ Gslb resources or use the optional Traefik IngressRoute adapter.
 An independent project, not an official k8gb component. The initial 0.1.0 release
 is a preview; review the deployment boundaries below before enabling writes.
 
+## Choose a management mode
+
+| Mode | What you manage in UI | What is created or updated | When to use it |
+| --- | --- | --- | --- |
+| **Native Gslb** | A standalone k8gb `Gslb` and its DNS policy | UI creates a `Gslb` referencing an existing Ingress or HTTPRoute, or edits its policy | You already use native Kubernetes routing and want no additional webhook |
+| **Traefik webhook** | An existing Traefik `IngressRoute` and its GSLB settings | UI updates the source annotations; the optional reconciler creates and maintains the global Ingress, Gslb and optional authorization Middleware | Your application routes are IngressRoutes and you do not want to maintain the extra k8gb-facing resources by hand |
+
+**Why the webhook?** Select **Create GSLB from IngressRoute**, choose the DNS name,
+sites and policy, then preview and apply. The adapter derives the DNS-facing
+resources from the source route; you do not directly edit its generated Gslb.
+k8gb still performs health evaluation and DNS publication. The adapter does not
+replace k8gb, Traefik, application Services, certificates or DNS delegation.
+
+Native mode needs no k8gb-ui webhook, even if Traefik happens to be your ordinary
+Ingress controller. Both modes can coexist for different objects; direct editing
+of webhook-owned Gslbs is blocked. Automatic native-to-webhook migration is not
+implemented. See [management workflows and boundaries](docs/deployment-options.md#management-modes).
+
+## Choose a deployment topology
+
+Console is the web UI; each participating cluster has its own agent.
+**UI placement and management mode are independent choices.**
+
+| Topology | Placement | Public UI address |
+| --- | --- | --- |
+| **A. One Console, many agents** | Console in one cluster, agents in every participating cluster | One HTTPS UI endpoint; Console can have multiple replicas in that cluster |
+| **B. Distributed Consoles, many agents** | Console and agent in each selected site; every Console connects to every agent | The same HTTPS hostname can be published through k8gb/GSLB across the Console sites |
+
+Either topology works **with or without** the Traefik webhook. Distributed
+Consoles share authentication configuration and the cookie-signing key, not a
+desired-state database. Agents keep distinct per-cluster URLs and credentials;
+audit is aggregated from their per-site journals. The chart does not automatically
+publish its own UI through GSLB or replicate Secrets between clusters.
+
+See [topology diagrams, the four combinations and shared-hostname setup](docs/deployment-options.md).
+
 ## Demo
 
 A two-site tour with real k8gb, DNS and Traefik:
@@ -13,14 +49,26 @@ A two-site tour with real k8gb, DNS and Traefik:
 - Preview changes across clusters, exclude and restore sites, override and reset IPs.
 - Configure mTLS and DNS SAN authorization, scope access with RBAC, and inspect audit history.
 
-<img src="docs/media/dns-balancing-animation.gif" alt="Animated DNS policy models showing round robin, weighted round robin, failover and recovery, and GeoIP" width="360">
+### Interface overview
 
-**Animated DNS policies:** round robin, weights, failover/recovery and GeoIP.
-The GIF plays inline; the models are illustrative, not live traffic telemetry.
+<img src="docs/media/k8gb-ui-overview.gif" alt="k8gb-ui interface tour: resources, multi-cluster creation, policy previews, site and IP controls, TLS, audit, access permissions and themes" width="960">
+
+**40-second interface tour:** 12 scenes covering native and IngressRoute creation,
+policy editing and previews, site/IP controls, mTLS, audit, namespace-scoped access
+and themes. Recorded from the real two-site lab, with English captions and an
+automatic loop.
 
 [Watch the full demo](docs/media/k8gb-ui-demo.mp4) (2:40, 1080p, English captions, no audio)
 or browse the [chapter list](docs/media/chapters.md). The full demo also includes
 real DNS, certificate and access-control checks.
+
+### DNS policy animation
+
+<img src="docs/media/dns-balancing-animation.gif" alt="Animated DNS policy models showing round robin, weighted round robin, failover and recovery, and GeoIP" width="360">
+
+**Animated DNS policies:** round robin, weights, failover/recovery and GeoIP.
+This separate GIF focuses on the DNS models; it is illustrative, not live traffic
+telemetry.
 
 ## Install in Kubernetes
 
@@ -38,7 +86,7 @@ Install an agent in **each** cluster. Console can run in one or all sites and
 connects to every agent over verified HTTPS. Start read-only, then explicitly
 enable administrator writes and, if needed, the IngressRoute webhook.
 
-Follow the [two-cluster installation guide](docs/installation.md) to prepare
+Follow the [installation guide for topology A or B](docs/installation.md) to prepare
 Secrets, HTTPS endpoints and the private values files used below. It covers
 built-in users without Keycloak, OIDC, shared audit and the optional webhook.
 There is no usable default password, and a bare `helm install` intentionally
@@ -55,8 +103,10 @@ helm --kube-context "$EAST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
   --wait --timeout 5m
 ```
 
-Repeat for the other site with its context, cluster ID and agent hostname. The
-guide includes both commands and the Console/write/webhook upgrade steps.
+Repeat for the other site with its context, cluster ID and agent hostname. Then
+choose single-site or distributed Console placement independently of enabling
+the webhook. The guide includes both agent commands and the corresponding
+Console/write/webhook upgrade steps.
 Replace all `.example.test` names with your own DNS names.
 
 ## Deployment

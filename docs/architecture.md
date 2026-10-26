@@ -10,6 +10,12 @@ development, or its own ServiceAccount in a cluster. Neither component is in
 the application's data or DNS serving path. Configuration remains in Kubernetes;
 only cluster registry and access policy live in Console configuration.
 
+Console placement is independent of the management provider: one Console can
+reach many agents, or distributed Consoles can share a public GSLB hostname and
+query the same agents. Native Gslb editing and optional IngressRoute automation
+work with either topology. See [deployment options and management workflows](deployment-options.md)
+for diagrams, shared-session requirements and UI publication bootstrapping.
+
 ## Identity and grouping
 
 - Cluster ID, display name and GeoTags are separate fields.
@@ -55,7 +61,7 @@ mandatory; a custom CA and client certificate are independently configurable.
 The bearer credential's scope is the entire configured agent scope: do not give
 untrusted callers direct agent access or trust a claimed actor header.
 
-## Future providers
+## Management providers
 
 `native` edits Gslb directly using validated plan/apply. `traefik` is an
 optional adapter preserving the annotation-driven workflow. Its admission checks,
