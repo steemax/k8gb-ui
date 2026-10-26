@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: k8gb-ui-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k8gb-ui-agent
+  namespace: k8gb-ui-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8gb-ui-agent-readonly
+rules:
+  - apiGroups: [k8gb.io, k8gb.absa.oss]
+    resources: [gslbs]
+    verbs: [get, list]
+  - apiGroups: ['']
+    resources: [namespaces, services]
+    verbs: [get, list]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses]
+    verbs: [get, list]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [httproutes]
+    verbs: [get, list]
+  - apiGroups: [externaldns.k8s.io]
+    resources: [dnsendpoints]
+    verbs: [get, list]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8gb-ui-agent-readonly
+subjects:
+  - kind: ServiceAccount
+    name: k8gb-ui-agent
+    namespace: k8gb-ui-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: k8gb-ui-agent-readonly

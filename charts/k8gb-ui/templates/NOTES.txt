@@ -1,0 +1,9 @@
+This chart does not install k8gb, Traefik, CRDs, certauthz, CA or credentials.
+Supply your own component images and existing Secrets before starting pods.
+Console and agent Services use HTTP inside the cluster; publish through trusted
+HTTPS Ingress/proxies and restrict access to those backends with NetworkPolicy.
+Both the Console agent registry and agent TLS verification remain HTTPS-only.
+With ConfigMap audit enabled, pre-provision the labelled journal in every allowed
+application namespace; see charts/k8gb-ui/README.md. No journal is reset by Helm.
+Changing auth/session secrets requires an explicit rollout; cookie keys must
+match across Console replicas/sites if shared sessions are desired.

@@ -1,0 +1,12 @@
+# Run the agent separately with --insecure-local --listen 127.0.0.1:8081.
+# The Console never reads a kubeconfig.
+listen: 127.0.0.1:8080
+auth:
+  mode: local
+clusters:
+  - id: east
+    name: East cluster
+    url: http://127.0.0.1:8081
+    geoTags: [east]
+    zones: [apps.example.test]
+    namespaces: [demo]

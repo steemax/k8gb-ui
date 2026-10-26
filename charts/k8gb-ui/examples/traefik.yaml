@@ -1,0 +1,16 @@
+# Overlay agent.yaml (and optionally writes.yaml). Set certificate/CA first.
+traefik:
+  enabled: true
+  domains: [apps.example.test]
+  ingressClass: traefik
+  ordinaryEntrypoints: [websecure]
+  mtlsEntrypoints: [secure-client]
+  tlsOptionNamespaces: [demo]
+  # Enable only after installing the same plugin in every Traefik.
+  certauthzAlias: ''
+webhook:
+  enabled: true
+  namespaces: [demo]
+  geoTags: [east, west]
+  tlsSecretName: webhook-tls
+  caBundle: '' # REQUIRED: base64 PEM CA, not the private key

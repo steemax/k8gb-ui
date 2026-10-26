@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="same-origin">
+  <title>k8gb-ui</title>
+  <script src="/static/k8gb-theme.js"></script>
+  <link rel="stylesheet" href="/static/k8gb.css">
+  <script defer src="/static/vendor/lucide.min.js"></script>
+  <script defer src="/static/k8gb-core.js"></script>
+  <script defer src="/static/k8gb-dns.js"></script>
+  <script defer src="/static/k8gb-mutations.js"></script>
+  <script defer src="/static/k8gb-app.js"></script>
+</head>
+<body>
+  <a class="k8gb-skip" href="#main">Skip to content</a>
+  <header class="k8gb-topbar">
+    <a class="k8gb-brand" href="/" aria-label="k8gb-ui home"><i data-lucide="network" aria-hidden="true"></i><strong>k8gb-ui</strong></a>
+    <span id="accessBadge" class="k8gb-readonly"><i data-lucide="lock-keyhole" aria-hidden="true"></i>Read-only</span>
+    <span id="demoBadge" class="k8gb-local" hidden>Demo</span>
+    <span class="k8gb-topbar-meta" id="snapshotTime">No snapshot</span>
+    <button type="button" id="refresh" class="k8gb-button k8gb-icon-button" title="Refresh snapshots" aria-label="Refresh snapshots"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
+    <button type="button" id="theme" class="k8gb-button k8gb-icon-button" title="Switch to dark theme" aria-label="Switch to dark theme"><i data-lucide="moon" aria-hidden="true"></i></button>
+    <form id="logout" action="/auth/logout" method="post" hidden><button type="submit" class="k8gb-button k8gb-icon-button" title="Sign out" aria-label="Sign out"><i data-lucide="log-out" aria-hidden="true"></i></button></form>
+  </header>
+  <main id="main" class="k8gb-main k8gb-workspace" tabindex="-1">
+    <section aria-labelledby="clustersHeading">
+      <div class="k8gb-list-heading k8gb-sites-heading"><h2 id="clustersHeading">Cluster Sites</h2><span class="k8gb-muted" id="siteCount"></span></div>
+      <div id="sites" class="k8gb-sources" aria-busy="true"><span class="k8gb-muted">Loading clusters...</span></div>
+    </section>
+    <div class="k8gb-toolbar k8gb-context">
+      <div class="k8gb-namespace"><label class="k8gb-label" for="namespace">Namespace</label><select id="namespace" disabled><option>Loading namespaces...</option></select></div>
+      <span class="k8gb-muted k8gb-small" id="snapshotScope"></span>
+      <span class="k8gb-spacer"></span>
+      <div id="mutationActions" class="k8gb-row"></div>
+      <button type="button" id="audit" class="k8gb-button"><i data-lucide="history" aria-hidden="true"></i>Audit</button>
+    </div>
+    <div id="notices" aria-live="polite" aria-atomic="true"></div>
+    <section id="catalog" aria-labelledby="catalogHeading">
+      <div class="k8gb-list-heading"><h1 id="catalogHeading">GSLB Resources</h1><span id="groupCount" class="k8gb-muted"></span><span class="k8gb-spacer"></span><div id="signalCounts" class="k8gb-row"></div></div>
+      <div class="k8gb-filters">
+        <div class="k8gb-search"><label for="search" class="k8gb-sr-only">Search name, URL, service or IP</label><i data-lucide="search" aria-hidden="true"></i><input id="search" type="search" placeholder="Name, URL, service or IP" autocomplete="off" spellcheck="false"></div>
+        <label class="k8gb-check"><input id="warningsFilter" type="checkbox">Warnings</label>
+        <label class="k8gb-check"><input id="dnsFilter" type="checkbox">DNS differences</label>
+        <span class="k8gb-spacer"></span>
+        <div class="k8gb-view-toggle" role="group" aria-label="Resource view">
+          <button type="button" class="k8gb-button k8gb-icon-button" data-view="cards" aria-pressed="true" aria-label="Card view" title="Card view"><i data-lucide="layout-grid" aria-hidden="true"></i></button>
+          <button type="button" class="k8gb-button k8gb-icon-button" data-view="rows" aria-pressed="false" aria-label="Row view" title="Row view"><i data-lucide="list" aria-hidden="true"></i></button>
+        </div>
+      </div>
+      <div id="resources" class="k8gb-grid" aria-busy="true"><p class="k8gb-empty">Loading snapshots...</p></div>
+    </section>
+    <section id="detail" aria-labelledby="detailHeading" hidden></section>
+  </main>
+  <noscript><p class="k8gb-notice">JavaScript is required to display cluster snapshots.</p></noscript>
+</body>
+</html>

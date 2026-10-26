@@ -1,0 +1,38 @@
+# Relative secret paths are resolved relative to this file, not the working directory.
+# HTTPS is terminated by a trusted ingress in front of the Console and each agent.
+listen: :8080
+auth:
+  mode: oidc
+  issuerURL: https://identity.example.test/realms/platform
+  clientID: k8gb-ui
+  clientSecretFile: /run/secrets/oidc-client-secret
+  redirectURL: https://gslb.example.test/auth/callback
+  cookieKeyFile: /run/secrets/session-key
+  groupsClaim: groups
+  bindings:
+    - groups: [platform-admins]
+      role: admin
+      clusters: ['*']
+      namespaces: ['*']
+    - groups: [team-catalog]
+      role: viewer
+      clusters: [east, west]
+      namespaces: [catalog]
+clusters:
+  - id: east
+    name: East cluster
+    url: https://agent-east.example.test
+    geoTags: [east]
+    zones: [apps.example.test]
+    bearerTokenFile: /run/secrets/east/token
+    caFile: /run/secrets/agent-ca.crt
+    # Optional client certificate, when mTLS is enforced by the ingress:
+    # clientCertFile: /run/secrets/console/tls.crt
+    # clientKeyFile: /run/secrets/console/tls.key
+  - id: west
+    name: West cluster
+    url: https://agent-west.example.test
+    geoTags: [west]
+    zones: [apps.example.test]
+    bearerTokenFile: /run/secrets/west/token
+    caFile: /run/secrets/agent-ca.crt

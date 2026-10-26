@@ -1,0 +1,36 @@
+# No external identity provider. Terminate HTTPS at a trusted ingress.
+# Mount users.yaml and a random session key from a Kubernetes Secret.
+listen: :8080
+writesEnabled: false
+auth:
+  mode: builtin
+  publicURL: https://gslb.example.test
+  cookieKeyFile: /run/secrets/session-key
+  usersFile: /run/secrets/users.yaml
+  bindings:
+    - groups: [platform-admins]
+      role: admin
+      clusters: ['*']
+      namespaces: ['*']
+    - groups: [team-catalog]
+      role: viewer
+      clusters: [east, west]
+      namespaces: [catalog]
+clusters:
+  - id: east
+    name: East cluster
+    url: https://agent-east.example.test
+    geoTags: [east]
+    zones: [apps.example.test]
+    bearerTokenFile: /run/secrets/east/read-token
+    caFile: /run/secrets/agent-ca.crt
+    # For writes also set writesEnabled: true and mount a separate write token:
+    # writeTokenFile: /run/secrets/east/write-token
+  - id: west
+    name: West cluster
+    url: https://agent-west.example.test
+    geoTags: [west]
+    zones: [apps.example.test]
+    bearerTokenFile: /run/secrets/west/read-token
+    caFile: /run/secrets/agent-ca.crt
+    # writeTokenFile: /run/secrets/west/write-token

@@ -1,0 +1,164 @@
+{{- if .Values.agent.enabled }}
+{{- if not .Values.agent.serviceAccountName }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "k8gb-ui.agentSA" . }}
+  labels: {{- include "k8gb-ui.labels" . | nindent 4 }}
+---
+{{- end }}
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "k8gb-ui.fullname" . }}-{{ .Release.Namespace }}-read
+  labels: {{- include "k8gb-ui.labels" . | nindent 4 }}
+rules:
+  - {apiGroups: [k8gb.io, k8gb.absa.oss], resources: [gslbs], verbs: [get, list]}
+  - {apiGroups: [""], resources: [namespaces, services], verbs: [get, list]}
+  - {apiGroups: [networking.k8s.io], resources: [ingresses], verbs: [get, list]}
+  - {apiGroups: [gateway.networking.k8s.io], resources: [httproutes], verbs: [get, list]}
+  - {apiGroups: [externaldns.k8s.io], resources: [dnsendpoints], verbs: [get, list]}
+  - {apiGroups: [discovery.k8s.io], resources: [endpointslices], verbs: [get, list]}
+  {{- if .Values.traefik.enabled }}
+  - {apiGroups: [traefik.io, traefik.containo.us], resources: [ingressroutes], verbs: [get, list]}
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [mutatingwebhookconfigurations]
+    resourceNames: [{{ include "k8gb-ui.webhookName" . }}]
+    verbs: [get]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "k8gb-ui.fullname" . }}-{{ .Release.Namespace }}-read
+  labels: {{- include "k8gb-ui.labels" . | nindent 4 }}
+subjects: [{kind: ServiceAccount, name: {{ include "k8gb-ui.agentSA" . }}, namespace: {{ .Release.Namespace }}}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ include "k8gb-ui.fullname" . }}-{{ .Release.Namespace }}-read}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "k8gb-ui.fullname" . }}-{{ .Release.Namespace }}-zones
+  namespace: {{ .Values.agent.controller.namespace }}
+  labels: {{- include "k8gb-ui.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [{{ .Values.agent.controller.deployment }}]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "k8gb-ui.fullname" . }}-{{ .Release.Namespace }}-zones
+  namespace: {{ .Values.agent.controller.namespace }}
+  labels: {{- include "k8gb-ui.labels" . | nindent 4 }}
+subjects: [{kind: ServiceAccount, name: {{ include "k8gb-ui.agentSA" . }}, namespace: {{ .Release.Namespace }}}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ include "k8gb-ui.fullname" . }}-{{ .Release.Namespace }}-zones}
+{{- range $ns := .Values.agent.namespaces }}
+{{- if or $.Values.agent.writesEnabled $.Values.agent.audit.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "k8gb-ui.fullname" $ }}-{{ $.Release.Namespace }}-agent
+  namespace: {{ $ns }}
+  labels: {{- include "k8gb-ui.labels" $ | nindent 4 }}
+rules:
+  {{- if $.Values.agent.writesEnabled }}
+  - {apiGroups: [k8gb.io, k8gb.absa.oss], resources: [gslbs], verbs: [get, create, patch]}
+  {{- if $.Values.agent.nativeSiteTraffic }}
+  - {apiGroups: [networking.k8s.io], resources: [ingresses], verbs: [get, patch]}
+  {{- end }}
+  {{- if $.Values.traefik.enabled }}
+  - {apiGroups: [traefik.io, traefik.containo.us], resources: [ingressroutes], verbs: [get, list, patch]}
+  {{- end }}
+  {{- end }}
+  {{- if $.Values.agent.audit.enabled }}
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [{{ $.Values.agent.audit.configMapName }}]
+    verbs: [get, update]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "k8gb-ui.fullname" $ }}-{{ $.Release.Namespace }}-agent
+  namespace: {{ $ns }}
+  labels: {{- include "k8gb-ui.labels" $ | nindent 4 }}
+subjects: [{kind: ServiceAccount, name: {{ include "k8gb-ui.agentSA" $ }}, namespace: {{ $.Release.Namespace }}}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ include "k8gb-ui.fullname" $ }}-{{ $.Release.Namespace }}-agent}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if .Values.webhook.enabled }}
+{{- if not .Values.webhook.serviceAccountName }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "k8gb-ui.webhookSA" . }}
+  labels: {{- include "k8gb-ui.labels" . | nindent 4 }}
+{{- end }}
+{{- if .Values.rbac.create }}
+{{- range $ns := .Values.webhook.namespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "k8gb-ui.fullname" $ }}-{{ $.Release.Namespace }}-webhook
+  namespace: {{ $ns }}
+  labels: {{- include "k8gb-ui.labels" $ | nindent 4 }}
+rules:
+  - {apiGroups: [""], resources: [services], verbs: [get]}
+  - {apiGroups: [traefik.io, traefik.containo.us], resources: [ingressroutes], verbs: [get, list]}
+  - {apiGroups: [networking.k8s.io], resources: [ingresses], verbs: [get, create, update, delete]}
+  - {apiGroups: [k8gb.io], resources: [gslbs], verbs: [get, list, create, update, delete]}
+  - {apiGroups: [k8gb.absa.oss], resources: [gslbs], verbs: [get, list]}
+  - {apiGroups: [gateway.networking.k8s.io], resources: [httproutes], verbs: [get]}
+  - {apiGroups: [traefik.io, traefik.containo.us], resources: [middlewares], verbs: [get, create, update, delete]}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "k8gb-ui.fullname" $ }}-{{ $.Release.Namespace }}-webhook
+  namespace: {{ $ns }}
+  labels: {{- include "k8gb-ui.labels" $ | nindent 4 }}
+subjects: [{kind: ServiceAccount, name: {{ include "k8gb-ui.webhookSA" $ }}, namespace: {{ $.Release.Namespace }}}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ include "k8gb-ui.fullname" $ }}-{{ $.Release.Namespace }}-webhook}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if and .Values.traefik.enabled .Values.rbac.create }}
+{{- $namespaces := .Values.traefik.tlsOptionNamespaces }}
+{{- if not $namespaces }}{{- $namespaces = concat .Values.agent.namespaces .Values.webhook.namespaces | uniq }}{{- end }}
+{{- range $ns := $namespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "k8gb-ui.fullname" $ }}-{{ $.Release.Namespace }}-tlsoptions
+  namespace: {{ $ns }}
+  labels: {{- include "k8gb-ui.labels" $ | nindent 4 }}
+rules:
+  - {apiGroups: [traefik.io, traefik.containo.us], resources: [tlsoptions], verbs: [get, list]}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "k8gb-ui.fullname" $ }}-{{ $.Release.Namespace }}-tlsoptions
+  namespace: {{ $ns }}
+  labels: {{- include "k8gb-ui.labels" $ | nindent 4 }}
+subjects:
+  {{- if $.Values.agent.enabled }}
+  - {kind: ServiceAccount, name: {{ include "k8gb-ui.agentSA" $ }}, namespace: {{ $.Release.Namespace }}}
+  {{- end }}
+  {{- if $.Values.webhook.enabled }}
+  - {kind: ServiceAccount, name: {{ include "k8gb-ui.webhookSA" $ }}, namespace: {{ $.Release.Namespace }}}
+  {{- end }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ include "k8gb-ui.fullname" $ }}-{{ $.Release.Namespace }}-tlsoptions}
+{{- end }}
+{{- end }}

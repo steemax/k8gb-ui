@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["console", "agent", "traefik", "webhook", "rbac"],
+  "properties": {
+    "rbac": {"type":"object", "required":["create"], "properties":{"create":{"type":"boolean"}}},
+    "console": {
+      "type":"object", "required":["enabled", "replicas", "image", "auth", "clusters"],
+      "properties": {
+        "enabled":{"type":"boolean"}, "writesEnabled":{"type":"boolean"},
+        "replicas":{"type":"integer", "minimum":1}, "image":{"$ref":"#/definitions/image"},
+        "authSecretName":{"type":"string"},
+        "auth":{"type":"object", "required":["mode", "cookieKeyFile", "bindings"], "properties":{
+          "mode":{"enum":["builtin", "oidc"]}, "cookieKeyFile":{"type":"string", "pattern":"^/"},
+          "bindings":{"type":"array", "items":{"type":"object", "required":["role", "clusters", "namespaces"], "properties":{
+            "role":{"enum":["admin", "viewer"]}, "groups":{"$ref":"#/definitions/strings"}, "subjects":{"$ref":"#/definitions/strings"},
+            "clusters":{"$ref":"#/definitions/strings"}, "namespaces":{"$ref":"#/definitions/strings"}
+          }}}
+        }},
+        "clusters":{"type":"array", "items":{"type":"object", "required":["id", "url", "zones", "bearerTokenFile"], "properties":{
+          "id":{"type":"string", "pattern":"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", "maxLength":63},
+          "url":{"type":"string", "pattern":"^https://"}, "zones":{"$ref":"#/definitions/strings"},
+          "bearerTokenFile":{"type":"string", "pattern":"^/"}
+        }}},
+        "secretMounts":{"type":"array", "items":{"type":"object", "additionalProperties":false, "required":["name", "mountPath", "secretName"], "properties":{
+          "name":{"type":"string", "pattern":"^[a-z][a-z0-9-]*$"}, "mountPath":{"type":"string", "pattern":"^/"}, "secretName":{"type":"string", "minLength":1}
+        }}}
+      }
+    },
+    "agent":{"type":"object", "properties":{
+      "enabled":{"type":"boolean"}, "writesEnabled":{"type":"boolean"}, "nativeSiteTraffic":{"type":"boolean"},
+      "replicas":{"type":"integer", "minimum":1}, "image":{"$ref":"#/definitions/image"},
+      "namespaces":{"$ref":"#/definitions/namespaces"}, "geoTags":{"$ref":"#/definitions/strings"},
+      "audit":{"type":"object", "properties":{"enabled":{"type":"boolean"}, "configMapName":{"type":"string", "minLength":1}}}
+    }},
+    "webhook":{"type":"object", "properties":{
+      "enabled":{"type":"boolean"}, "replicas":{"type":"integer", "minimum":1}, "image":{"$ref":"#/definitions/image"},
+      "namespaces":{"$ref":"#/definitions/namespaces"}, "geoTags":{"$ref":"#/definitions/strings"}
+    }}
+  },
+  "definitions": {
+    "strings":{"type":"array", "uniqueItems":true, "items":{"type":"string", "minLength":1}},
+    "namespaces":{"type":"array", "uniqueItems":true, "items":{"type":"string", "maxLength":63, "pattern":"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"}},
+    "image":{"type":"object", "required":["repository", "tag", "pullPolicy"], "properties":{
+      "repository":{"type":"string", "minLength":1}, "tag":{"type":"string", "minLength":1}, "pullPolicy":{"enum":["Always", "IfNotPresent", "Never"]}
+    }}
+  }
+}

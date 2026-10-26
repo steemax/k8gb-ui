@@ -1,0 +1,42 @@
+{{- range $component := list "console" "agent" }}
+{{- $v := index $.Values $component }}
+{{- if $v.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "k8gb-ui.fullname" $ }}-{{ $component }}
+  labels: {{- include "k8gb-ui.labels" $ | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {app.kubernetes.io/instance: {{ $.Release.Name }}, app.kubernetes.io/component: {{ $component }}}
+  ports:
+    - {name: http, port: {{ ternary 8080 8081 (eq $component "console") }}, targetPort: http}
+{{- if $v.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "k8gb-ui.fullname" $ }}-{{ $component }}
+  labels: {{- include "k8gb-ui.labels" $ | nindent 4 }}
+  {{- with $v.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $v.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  tls: [{secretName: {{ $v.ingress.tlsSecretName | quote }}, hosts: [{{ $v.ingress.host | quote }}]}]
+  rules:
+    - host: {{ $v.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "k8gb-ui.fullname" $ }}-{{ $component }}
+                port: {name: http}
+{{- end }}
+{{- end }}
+{{- end }}

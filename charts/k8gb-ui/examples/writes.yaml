@@ -1,0 +1,8 @@
+# Overlay the appropriate Console and/or agent profile. Install the audit
+# ConfigMap from deploy/agent-audit-configmap.yaml in each application NS first.
+console: {writesEnabled: true}
+agent:
+  writesEnabled: true
+  audit: {enabled: true}
+# Add writeTokenFile to EACH console.clusters entry in your private values.
+# The agent Secret needs distinct token, write-token and plan-key entries.

@@ -1,0 +1,28 @@
+# Optional: repeat in each approved TLSOption namespace, not necessarily the
+# application namespace. This grants policy reads, NEVER Secret access.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: k8gb-ui-traefik-security
+  namespace: demo
+rules:
+  - apiGroups: [traefik.io, traefik.containo.us]
+    resources: [tlsoptions]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k8gb-ui-traefik-security
+  namespace: demo
+subjects:
+  - kind: ServiceAccount
+    name: k8gb-ui-agent
+    namespace: k8gb-ui-system
+  - kind: ServiceAccount
+    name: k8gb-ui-traefik
+    namespace: k8gb-ui-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: k8gb-ui-traefik-security

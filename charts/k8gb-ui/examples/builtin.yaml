@@ -1,0 +1,32 @@
+console:
+  authSecretName: ui-auth
+  auth:
+    mode: builtin
+    publicURL: https://gslb.example.test
+    usersFile: /run/auth/users.yaml
+    cookieKeyFile: /run/auth/session-key
+    bindings:
+      - {role: admin, groups: [platform-admins], clusters: ['*'], namespaces: ['*']}
+      - {role: viewer, groups: [team-demo], clusters: [east, west], namespaces: [demo]}
+  clusters:
+    - id: east
+      name: East
+      url: https://east-agent.example.test
+      zones: [apps.example.test]
+      namespaces: [demo]
+      bearerTokenFile: /run/sites/east/token
+      caFile: /run/sites/east/ca.crt
+    - id: west
+      name: West
+      url: https://west-agent.example.test
+      zones: [apps.example.test]
+      namespaces: [demo]
+      bearerTokenFile: /run/sites/west/token
+      caFile: /run/sites/west/ca.crt
+  secretMounts:
+    - {name: east, secretName: east-connection, mountPath: /run/sites/east}
+    - {name: west, secretName: west-connection, mountPath: /run/sites/west}
+  ingress:
+    enabled: true
+    host: gslb.example.test
+    tlsSecretName: ui-tls

@@ -1,0 +1,20 @@
+# Example routing target for an existing application namespace. Change the
+# hostname, ingress class and Service to match your test environment.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: catalog
+  namespace: demo
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: catalog.apps.example.test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: catalog
+                port:
+                  number: 8080

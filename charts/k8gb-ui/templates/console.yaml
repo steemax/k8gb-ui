@@ -1,0 +1,56 @@
+{{- if .Values.console.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "k8gb-ui.fullname" . }}-console
+  labels: {{- include "k8gb-ui.labels" . | nindent 4 }}
+data:
+  console.yaml: |
+    {{- include "k8gb-ui.consoleConfig" . | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "k8gb-ui.fullname" . }}-console
+  labels: {{- include "k8gb-ui.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.console.replicas }}
+  selector:
+    matchLabels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: console}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: console}
+      annotations:
+        checksum/config: {{ include "k8gb-ui.consoleConfig" . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {{- include "k8gb-ui.podSecurity" . | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: console
+          image: {{ printf "%s:%s" .Values.console.image.repository .Values.console.image.tag | quote }}
+          imagePullPolicy: {{ .Values.console.image.pullPolicy }}
+          args: [--config, /etc/k8gb-ui/console.yaml]
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: http}}
+          livenessProbe: {httpGet: {path: /healthz, port: http}}
+          securityContext: {{- include "k8gb-ui.containerSecurity" . | nindent 12 }}
+          resources: {{- toYaml .Values.console.resources | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/k8gb-ui, readOnly: true}
+            - {name: auth, mountPath: /run/auth, readOnly: true}
+            {{- range .Values.console.secretMounts }}
+            - {name: {{ .name | quote }}, mountPath: {{ .mountPath | quote }}, readOnly: true}
+            {{- end }}
+      volumes:
+        - name: config
+          configMap: {name: {{ include "k8gb-ui.fullname" . }}-console}
+        - name: auth
+          secret: {secretName: {{ .Values.console.authSecretName }}, defaultMode: 0440}
+        {{- range .Values.console.secretMounts }}
+        - name: {{ .name | quote }}
+          secret: {secretName: {{ .secretName | quote }}, defaultMode: 0440}
+        {{- end }}
+{{- end }}

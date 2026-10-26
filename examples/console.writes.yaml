@@ -1,0 +1,31 @@
+# Template: mount your own secrets/certificates and configure your OIDC issuer.
+listen: :8080
+writesEnabled: true
+auth:
+  mode: oidc
+  issuerURL: https://identity.example.test/realms/platform
+  clientID: k8gb-ui
+  clientSecretFile: /run/secrets/oidc-client-secret
+  redirectURL: https://gslb.example.test/auth/callback
+  cookieKeyFile: /run/secrets/session-key
+  groupsClaim: groups
+  bindings:
+    - groups: [platform-admins]
+      role: admin
+      clusters: ['*']
+      namespaces: ['*']
+    - groups: [team-catalog]
+      role: viewer
+      clusters: [east]
+      namespaces: [catalog]
+clusters:
+  - id: east
+    name: East cluster
+    url: https://agent-east.example.test
+    geoTags: [east]
+    zones: [apps.example.test]
+    bearerTokenFile: /run/secrets/east/read-token
+    writeTokenFile: /run/secrets/east/write-token
+    caFile: /run/secrets/agent-ca.crt
+    # clientCertFile: /run/secrets/console/tls.crt
+    # clientKeyFile: /run/secrets/console/tls.key

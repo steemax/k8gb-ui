@@ -1,0 +1,66 @@
+name: Publish images
+
+"on":
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Application version matching Chart.yaml appVersion (no v prefix)
+        type: string
+        required: true
+        default: "0.1.0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-images
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.ref_name == github.event.repository.default_branch
+    uses: ./.github/workflows/ci.yaml
+    with:
+      version: ${{ inputs.version }}
+  publish:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [console, agent, webhook]
+    env:
+      VERSION: ${{ inputs.version }}
+      IMAGE_REPOSITORY: steemax/k8gb-ui
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Require project license
+        run: test -s LICENSE
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Refuse to replace a published tag
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          if docker buildx imagetools inspect "$IMAGE_REPOSITORY:$VERSION-$COMPONENT" > /dev/null 2>&1; then
+            echo "Image tag already exists; publish a new version instead."
+            exit 1
+          fi
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          username: steemax
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            COMPONENT=${{ matrix.component }}
+            VERSION=${{ inputs.version }}
+          tags: steemax/k8gb-ui:${{ inputs.version }}-${{ matrix.component }}
+          provenance: mode=min
+          sbom: true

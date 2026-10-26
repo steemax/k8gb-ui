@@ -1,0 +1,50 @@
+name: CI
+
+"on":
+  push:
+  pull_request:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: false
+        default: ""
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: v4.2.3
+      - run: go mod verify
+      - run: go mod tidy -diff
+      - run: go vet ./...
+      - run: make test
+      - run: make vulncheck
+      - name: Lint chart profiles
+        run: |
+          helm lint --strict charts/k8gb-ui -f charts/k8gb-ui/examples/builtin.yaml
+          helm lint --strict charts/k8gb-ui -f charts/k8gb-ui/examples/builtin.yaml -f charts/k8gb-ui/examples/oidc.yaml
+          helm lint --strict charts/k8gb-ui -f charts/k8gb-ui/examples/agent.yaml
+          helm lint --strict charts/k8gb-ui -f charts/k8gb-ui/examples/agent.yaml -f charts/k8gb-ui/examples/writes.yaml -f charts/k8gb-ui/examples/traefik.yaml --set webhook.caBundle=Y2E=
+      - run: make chart
+      - name: Build and smoke-test component images locally
+        run: make image-smoke

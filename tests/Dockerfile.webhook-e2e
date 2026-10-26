@@ -1,0 +1,5 @@
+# Local acceptance fixture only: binary is cross-compiled by the host Go toolchain.
+FROM scratch
+COPY bin/webhook /webhook
+USER 65532:65532
+ENTRYPOINT ["/webhook"]

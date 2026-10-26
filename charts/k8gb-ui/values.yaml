@@ -1,0 +1,79 @@
+# Three component tags in one Docker Hub repository. k8gb/Traefik, CRDs,
+# CA/TLSOptions and credentials are supplied by the operator.
+nameOverride: ""
+fullnameOverride: ""
+imagePullSecrets: []
+rbac:
+  create: true
+console:
+  enabled: true
+  replicas: 1
+  image: {repository: steemax/k8gb-ui, tag: 0.1.0-console, pullPolicy: IfNotPresent}
+  writesEnabled: false
+  authSecretName: ""
+  auth:
+    mode: builtin
+    publicURL: ""
+    usersFile: /run/auth/users.yaml
+    cookieKeyFile: /run/auth/session-key
+    bindings: []
+  clusters: []
+  # Only Secret volumes; config contains file paths, never credential values.
+  secretMounts: []
+  ingress:
+    enabled: false
+    className: ""
+    host: ""
+    tlsSecretName: ""
+    annotations: {}
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+agent:
+  enabled: false
+  replicas: 1
+  image: {repository: steemax/k8gb-ui, tag: 0.1.0-agent, pullPolicy: IfNotPresent}
+  serviceAccountName: ""
+  clusterID: ""
+  namespaces: []
+  geoTags: []
+  authSecretName: ""
+  writesEnabled: false
+  nativeSiteTraffic: false
+  # Pre-create a labelled ConfigMap in every application NS. The chart NEVER
+  # owns/rewrites journal data, including during upgrade/rollback/uninstall.
+  audit: {enabled: false, configMapName: k8gb-ui-audit}
+  controller: {namespace: k8gb, deployment: k8gb, container: ""}
+  ingress:
+    enabled: false
+    className: ""
+    host: ""
+    tlsSecretName: ""
+    annotations: {}
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+traefik:
+  enabled: false
+  domains: []
+  ingressClass: traefik
+  ordinaryEntrypoints: [websecure, grpc, grpctls]
+  mtlsEntrypoints: []
+  tlsOptionNamespaces: []
+  certauthzAlias: ""
+  # Set when using an existing webhook installed by another release.
+  webhookConfigurationName: ""
+webhook:
+  enabled: false
+  replicas: 1
+  image: {repository: steemax/k8gb-ui, tag: 0.1.0-webhook, pullPolicy: IfNotPresent}
+  serviceAccountName: ""
+  tlsSecretName: ""
+  # Base64 PEM CA for the certificate, with SAN <release>-webhook.<ns>.svc.
+  caBundle: ""
+  namespaces: []
+  geoTags: []
+  reconcileInterval: 10s
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 256Mi}

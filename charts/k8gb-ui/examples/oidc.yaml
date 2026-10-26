@@ -1,0 +1,15 @@
+# Overlay examples/builtin.yaml; groups are in the verified ID token, not headers.
+console:
+  authSecretName: ui-oidc
+  auth:
+    mode: oidc
+    publicURL: ''
+    usersFile: ''
+    issuerURL: https://idp.example.test/realms/platform
+    clientID: k8gb-ui
+    clientSecretFile: /run/auth/client-secret
+    redirectURL: https://gslb.example.test/auth/callback
+    cookieKeyFile: /run/auth/session-key
+    groupsClaim: groups
+    # Optional private CA, mounted in authSecretName; system roots remain trusted.
+    # issuerCAFile: /run/auth/issuer-ca.crt

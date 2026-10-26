@@ -1,0 +1,43 @@
+# Repeat this Role/RoleBinding in each explicit --allowed-namespaces namespace.
+# The example assumes an existing application namespace named demo.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: k8gb-ui-traefik
+  namespace: demo
+rules:
+  - apiGroups: ['']
+    resources: [services]
+    verbs: [get]
+  - apiGroups: [traefik.io, traefik.containo.us]
+    resources: [ingressroutes]
+    verbs: [get, list]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses]
+    verbs: [get, create, update, delete]
+  - apiGroups: [k8gb.io]
+    resources: [gslbs]
+    verbs: [get, list, create, update, delete]
+  - apiGroups: [k8gb.absa.oss]
+    resources: [gslbs]
+    verbs: [get, list]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [httproutes]
+    verbs: [get]
+  - apiGroups: [traefik.io, traefik.containo.us]
+    resources: [middlewares]
+    verbs: [get, create, update, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k8gb-ui-traefik
+  namespace: demo
+subjects:
+  - kind: ServiceAccount
+    name: k8gb-ui-traefik
+    namespace: k8gb-ui-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: k8gb-ui-traefik

@@ -1,0 +1,12 @@
+# Install once in EACH participating cluster; change clusterID per site.
+console: {enabled: false}
+agent:
+  enabled: true
+  clusterID: east
+  namespaces: [demo]
+  geoTags: [east, west]
+  authSecretName: agent-auth
+  ingress:
+    enabled: true
+    host: east-agent.example.test
+    tlsSecretName: agent-tls

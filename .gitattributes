@@ -1,0 +1,25 @@
+* text=auto
+*.sh text eol=lf
+Dockerfile text eol=lf
+Makefile text eol=lf
+*.mp4 -text
+*.gif -text
+*.jpg -text
+
+AGENTS.md export-ignore
+AGENTS.local.md export-ignore
+CLAUDE.md export-ignore
+CLAUDE.local.md export-ignore
+GEMINI.md export-ignore
+.codex export-ignore
+.agents export-ignore
+.claude export-ignore
+.cursor export-ignore
+.aider* export-ignore
+.continue export-ignore
+.windsurf export-ignore
+artifacts export-ignore
+bin export-ignore
+dist export-ignore
+docs/publication-readiness.md export-ignore
+docs/migration.md export-ignore

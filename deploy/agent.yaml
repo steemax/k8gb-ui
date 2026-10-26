@@ -1,0 +1,77 @@
+# Build/load an agent image first; this is not a published image.
+# Provide k8gb-ui-agent-auth/token separately. Do not commit its value.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8gb-ui-agent
+  namespace: k8gb-ui-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: k8gb-ui-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: k8gb-ui-agent
+    spec:
+      serviceAccountName: k8gb-ui-agent
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: steemax/k8gb-ui:0.1.0-agent
+          imagePullPolicy: IfNotPresent
+          args:
+            - --cluster-id=east
+            - --listen=:8081
+            - --token-file=/run/secrets/agent/token
+          ports:
+            - name: http
+              containerPort: 8081
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: auth
+              mountPath: /run/secrets/agent
+              readOnly: true
+      volumes:
+        - name: auth
+          secret:
+            secretName: k8gb-ui-agent-auth
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8gb-ui-agent
+  namespace: k8gb-ui-system
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: k8gb-ui-agent
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http

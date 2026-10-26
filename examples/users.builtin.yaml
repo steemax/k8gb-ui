@@ -1,0 +1,9 @@
+# Template only: replace EVERY placeholder using bin/password-hash.
+# This file is intentionally rejected until real Argon2id hashes are provided.
+users:
+  - username: operator
+    passwordHash: REPLACE_WITH_ARGON2ID_HASH
+    groups: [platform-admins]
+  - username: catalog-reader
+    passwordHash: REPLACE_WITH_ARGON2ID_HASH
+    groups: [team-catalog]

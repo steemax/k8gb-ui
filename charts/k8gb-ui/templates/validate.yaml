@@ -1,0 +1,46 @@
+{{- if not (or .Values.console.enabled .Values.agent.enabled .Values.webhook.enabled) -}}
+{{- fail "Enable at least one component" -}}
+{{- end -}}
+{{- if .Values.console.enabled -}}
+{{- $a := .Values.console.auth -}}
+{{- if not (has $a.mode (list "builtin" "oidc")) -}}{{- fail "Chart auth.mode must be builtin or oidc; loopback local mode must never be published" -}}{{- end -}}
+{{- $_ := required "console.authSecretName is required (shared session key and users/client secret)" .Values.console.authSecretName -}}
+{{- $_ := required "console.auth.bindings must be explicit (default deny)" $a.bindings -}}
+{{- $_ := required "console.clusters must be explicit" .Values.console.clusters -}}
+{{- if eq $a.mode "builtin" -}}
+{{- if not (hasPrefix "https://" (default "" $a.publicURL)) -}}{{- fail "builtin auth requires HTTPS publicURL" -}}{{- end -}}
+{{- $_ := required "builtin auth requires usersFile" $a.usersFile -}}
+{{- else -}}
+{{- if not (hasPrefix "https://" (default "" $a.issuerURL)) -}}{{- fail "OIDC requires HTTPS issuerURL" -}}{{- end -}}
+{{- if not (and (hasPrefix "https://" (default "" $a.redirectURL)) (hasSuffix "/auth/callback" $a.redirectURL)) -}}{{- fail "OIDC requires HTTPS redirectURL ending in /auth/callback" -}}{{- end -}}
+{{- $_ := required "OIDC requires clientID" $a.clientID -}}
+{{- end -}}
+{{- $_ := required "auth requires cookieKeyFile" $a.cookieKeyFile -}}
+{{- range .Values.console.clusters -}}
+{{- if not (hasPrefix "https://" .url) -}}{{- fail "Every agent URL must use HTTPS" -}}{{- end -}}
+{{- $_ := required "Every cluster requires bearerTokenFile" .bearerTokenFile -}}
+{{- $_ := required "Every cluster requires explicit zones" .zones -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.agent.enabled -}}
+{{- $_ := required "agent.clusterID is required" .Values.agent.clusterID -}}
+{{- $_ := required "agent.authSecretName is required" .Values.agent.authSecretName -}}
+{{- $_ := required "agent.namespaces must explicitly scope the deployment" .Values.agent.namespaces -}}
+{{- if .Values.agent.writesEnabled -}}{{- $_ := required "agent writes require geoTags" .Values.agent.geoTags -}}{{- end -}}
+{{- if and .Values.agent.nativeSiteTraffic (not .Values.agent.writesEnabled) -}}{{- fail "nativeSiteTraffic requires agent.writesEnabled" -}}{{- end -}}
+{{- if and (gt (int .Values.agent.replicas) 1) (not .Values.agent.audit.enabled) -}}{{- fail "Multiple agent replicas require a shared ConfigMap audit journal" -}}{{- end -}}
+{{- end -}}
+{{- if .Values.webhook.enabled -}}
+{{- if not .Values.traefik.enabled -}}{{- fail "webhook requires traefik.enabled" -}}{{- end -}}
+{{- $_ := required "webhook requires namespaces" .Values.webhook.namespaces -}}
+{{- $_ := required "webhook requires geoTags" .Values.webhook.geoTags -}}
+{{- $_ := required "webhook requires an existing TLS Secret" .Values.webhook.tlsSecretName -}}
+{{- $_ := required "webhook requires an explicit trusted caBundle" .Values.webhook.caBundle -}}
+{{- end -}}
+{{- range $component := list "console" "agent" -}}
+{{- $v := index $.Values $component -}}
+{{- if and $v.enabled $v.ingress.enabled -}}
+{{- $_ := required (printf "%s ingress needs host" $component) $v.ingress.host -}}
+{{- $_ := required (printf "%s ingress needs tlsSecretName" $component) $v.ingress.tlsSecretName -}}
+{{- end -}}
+{{- end -}}

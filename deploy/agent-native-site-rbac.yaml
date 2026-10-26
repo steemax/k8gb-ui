@@ -1,0 +1,29 @@
+# Optional namespace-scoped permissions for --enable-native-site-traffic only.
+# Replace app with each explicitly allowed application namespace. Install alongside
+# the existing agent roles; the read-only role is deliberately unchanged.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: k8gb-ui-agent-native-site
+  namespace: app
+rules:
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses]
+    verbs: [get, patch]
+  - apiGroups: ['']
+    resources: [services]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k8gb-ui-agent-native-site
+  namespace: app
+subjects:
+  - kind: ServiceAccount
+    name: k8gb-ui-agent
+    namespace: k8gb-ui-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: k8gb-ui-agent-native-site

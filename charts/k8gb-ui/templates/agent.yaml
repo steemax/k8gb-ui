@@ -1,0 +1,65 @@
+{{- if .Values.agent.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "k8gb-ui.fullname" . }}-agent
+  labels: {{- include "k8gb-ui.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.agent.replicas }}
+  selector:
+    matchLabels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: agent}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: agent}
+    spec:
+      serviceAccountName: {{ include "k8gb-ui.agentSA" . }}
+      securityContext: {{- include "k8gb-ui.podSecurity" . | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: agent
+          image: {{ printf "%s:%s" .Values.agent.image.repository .Values.agent.image.tag | quote }}
+          imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
+          args:
+            - --listen=:8081
+            - --cluster-id={{ .Values.agent.clusterID }}
+            - --token-file=/run/auth/token
+            - --allowed-namespaces={{ join "," .Values.agent.namespaces }}
+            - --geotags={{ join "," .Values.agent.geoTags }}
+            - --k8gb-namespace={{ .Values.agent.controller.namespace }}
+            - --k8gb-deployment={{ .Values.agent.controller.deployment }}
+            {{- with .Values.agent.controller.container }}
+            - --k8gb-container={{ . }}
+            {{- end }}
+            {{- if .Values.agent.writesEnabled }}
+            - --enable-writes
+            - --write-token-file=/run/auth/write-token
+            - --plan-key-file=/run/auth/plan-key
+            {{- end }}
+            {{- if .Values.agent.nativeSiteTraffic }}
+            - --enable-native-site-traffic
+            {{- end }}
+            {{- if .Values.agent.audit.enabled }}
+            - --audit-configmap={{ .Values.agent.audit.configMapName }}
+            {{- end }}
+            {{- if .Values.traefik.enabled }}
+            - --traefik-adapter
+            - --traefik-domains={{ join "," .Values.traefik.domains }}
+            - --traefik-ingress-class={{ .Values.traefik.ingressClass }}
+            - --traefik-ordinary-entrypoints={{ join "," .Values.traefik.ordinaryEntrypoints }}
+            - --traefik-mtls-entrypoints={{ join "," .Values.traefik.mtlsEntrypoints }}
+            - --traefik-tls-option-namespaces={{ join "," .Values.traefik.tlsOptionNamespaces }}
+            - --traefik-cn-plugin={{ .Values.traefik.certauthzAlias }}
+            - --traefik-webhook-config={{ include "k8gb-ui.webhookName" . }}
+            {{- end }}
+          ports: [{name: http, containerPort: 8081}]
+          readinessProbe: {httpGet: {path: /healthz, port: http}}
+          livenessProbe: {httpGet: {path: /healthz, port: http}}
+          securityContext: {{- include "k8gb-ui.containerSecurity" . | nindent 12 }}
+          resources: {{- toYaml .Values.agent.resources | nindent 12 }}
+          volumeMounts: [{name: auth, mountPath: /run/auth, readOnly: true}]
+      volumes:
+        - name: auth
+          secret: {secretName: {{ .Values.agent.authSecretName }}, defaultMode: 0440}
+{{- end }}
