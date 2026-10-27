@@ -6,23 +6,24 @@ adapter. The chart does not install Keycloak, certauthz, CA, TLSOptions or CRDs.
 
 The chart requires Kubernetes 1.26 or newer. It has been checked with Helm 4.2.3
 and a two-site kind/k8gb v1.0.0 lab; Helm 3 and a broader Kubernetes/k8gb matrix
-are not yet validated. Treat 0.1.0 as a preview, not a production support guarantee.
+are not yet validated. Treat 0.1.x as a preview, not a production support guarantee.
 It is licensed under [Apache-2.0](LICENSE).
 
 ## Images and chart repository
 
-All components use `steemax/k8gb-ui` with distinct tags: `0.1.0-console`,
-`0.1.0-agent`, `0.1.0-webhook`. The operator can override each component's
+All components use `steemax/k8gb-ui` with distinct tags: `0.1.1-console`,
+`0.1.1-agent`, `0.1.1-webhook`. The operator can override each component's
 `image.repository`, `image.tag` and `image.pullPolicy`, plus `imagePullSecrets`.
 
-The chart repository is hosted on GitHub Pages. Once the maintainer publishes
-it, replace `GITHUB_OWNER` and `GITHUB_REPOSITORY` with the actual GitHub identity
-(which need not match the Docker Hub account):
+The chart repository is hosted on GitHub Pages. Confirm that the requested
+version is available before installing it. Forks should substitute their own
+Pages URL, which need not match the Docker Hub account:
 
 ```sh
-helm repo add k8gb-ui https://GITHUB_OWNER.github.io/GITHUB_REPOSITORY/
+helm repo add k8gb-ui https://steemax.github.io/k8gb-ui/
 helm repo update
-helm upgrade --install ui k8gb-ui/k8gb-ui --version 0.1.0 \
+helm search repo k8gb-ui/k8gb-ui --versions
+helm upgrade --install ui k8gb-ui/k8gb-ui --version 0.1.1 \
   -n k8gb-ui --create-namespace -f /absolute/private/console-values.yaml
 ```
 
@@ -56,7 +57,7 @@ pins its Go builder and nonroot runtime by digest. Never reuse a published versi
 tag for different content.
 
 ```sh
-make images VERSION=0.1.0
+make images VERSION=0.1.1
 helm lint charts/k8gb-ui -f charts/k8gb-ui/examples/builtin.yaml
 helm template ui charts/k8gb-ui -n k8gb-ui -f /absolute/private/console-values.yaml
 helm upgrade --install ui charts/k8gb-ui -n k8gb-ui --create-namespace \

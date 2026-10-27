@@ -2,6 +2,6 @@ apiVersion: v2
 name: k8gb-ui
 description: Multi-cluster k8gb console, site agent and optional Traefik adapter
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.1.1
+appVersion: "0.1.1"
 kubeVersion: ">=1.26.0-0"

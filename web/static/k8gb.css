@@ -136,6 +136,9 @@ body { margin:0; background:var(--ui-page-bg); color:var(--ui-text); font:14px/1
 .k8gb-object-table.selectable td:nth-child(2) { width:27%; }
 .k8gb-object-selector { cursor:pointer; }
 .k8gb-selection { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; position:sticky; top:8px; z-index:20; padding:10px 12px; margin:0 0 12px; border:1px solid var(--ui-shell-accent); border-left-width:3px; border-radius:5px; background:var(--ui-surface); box-shadow:var(--ui-shadow); font-size:12px; }
+.k8gb-bulk-sites { display:flex; flex-wrap:wrap; gap:12px 24px; }
+#mutationBulkSummary { margin-bottom:20px; }
+.k8gb-select-column { min-width:38px; }
 .k8gb-tile-main { padding:11px 13px 10px; flex:1; }
 .k8gb-tile-status { display:flex; align-items:center; flex-wrap:wrap; gap:8px; justify-content:space-between; min-height:18px; margin-bottom:7px; }
 .k8gb-tile-status>.k8gb-state { padding:2px 6px; border-radius:3px; background:var(--ui-success-soft); }

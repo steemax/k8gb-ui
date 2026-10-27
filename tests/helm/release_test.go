@@ -46,6 +46,23 @@ func TestReleaseImageDefaults(t *testing.T) {
 	if err != nil || !strings.Contains(string(makefile), "\nVERSION ?= "+chart.AppVersion+"\n") {
 		t.Fatal("Makefile's default image version must match appVersion")
 	}
+	workflowRaw, err := os.ReadFile("../../.github/workflows/publish-images.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		On map[string]struct {
+			Inputs map[string]struct {
+				Default string `json:"default"`
+			} `json:"inputs"`
+		} `json:"on"`
+	}
+	if err := yaml.Unmarshal(workflowRaw, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	if got := workflow.On["workflow_dispatch"].Inputs["version"].Default; got != chart.AppVersion {
+		t.Fatalf("Publish images default version = %q, want appVersion %q", got, chart.AppVersion)
+	}
 	license, err := os.ReadFile("../../LICENSE")
 	if err != nil || !bytes.Contains(license, []byte("Apache License")) {
 		t.Fatal("missing project Apache-2.0 license")

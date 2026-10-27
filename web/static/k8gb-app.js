@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const C = window.K8gbCore, M = window.K8gbMutations, h = C.escape, $ = id => document.getElementById(id);
-  const state = {clusters:[], namespaces:[], namespace:null, overview:null, demo:false, clusterError:'', namespaceError:'', overviewError:'', loading:false, metadataLoading:true, view:'cards', selected:C.groupFromHash(location.hash), tab:'overview', policyIndex:0};
+  const state = {clusters:[], namespaces:[], namespace:null, overview:null, demo:false, clusterError:'', namespaceError:'', overviewError:'', loading:false, metadataLoading:true, view:'cards', selected:C.groupFromHash(location.hash), selection:new Set(), tab:'overview', policyIndex:0};
   const requests = {clusters:C.createLatestRequest(), namespaces:C.createLatestRequest(), overview:C.createLatestRequest()};
   const dns = window.K8gbDNS.createView();
   const mutationContext = () => ({overview:state.overview, namespace:state.namespace, demo:state.demo, stale:state.loading || state.metadataLoading || !!state.overviewError || !!state.clusterError});
@@ -120,6 +120,18 @@
   }
   function renderCatalog() {
     const groups = C.list(state.overview?.groups), visible = C.filterGroups(groups, {query:$('search').value, warnings:$('warningsFilter').checked, dns:$('dnsFilter').checked});
+    const context = mutationContext(), editable = M.hasEdits(context,{native:['excludeSite','includeSite'],traefik:['excludeSite','includeSite']});
+    if (!context.stale) for (const id of state.selection) if (!groups.some(group => group.id === id && M.selectableGroup(context,group))) state.selection.delete(id);
+    const selectable = visible.filter(group => M.selectableGroup(context,group)), selected = selectable.filter(group => state.selection.has(group.id));
+    $('selectionControl').hidden = !editable;
+    $('selectVisible').disabled = !selectable.length;
+    $('selectVisible').checked = selectable.length > 0 && selected.length === selectable.length;
+    $('selectVisible').indeterminate = selected.length > 0 && selected.length < selectable.length;
+    $('selectionBar').hidden = !state.selection.size;
+    const hidden = [...state.selection].filter(id => !visible.some(group => group.id === id)).length;
+    $('selectionCount').textContent = `${state.selection.size} selected${hidden ? ` / ${hidden} hidden by filters` : ''}`;
+    for (const operation of ['excludeSite','includeSite']) document.querySelector(`[data-bulk-operation="${operation}"]`).disabled = !state.selection.size || !M.hasEdits(context,{native:[operation],traefik:[operation]});
+    const selector = group => editable && M.selectableGroup(context,group) ? `<input type="checkbox" class="k8gb-object-selector" data-select-group="${h(group.id)}" aria-label="Select ${h(group.hostname || names(group))}"${state.selection.has(group.id) ? ' checked' : ''}>` : '';
     $('groupCount').textContent = `${visible.length} / ${groups.length}`;
     $('signalCounts').innerHTML = `${badge(C.countLabel(groups.filter(C.hasWarnings).length, 'warning'), 'warning')}${badge(`${groups.filter(group => statusFor(group).tone === 'unknown').length} unknown`, 'unknown')}${badge(C.countLabel(groups.filter(group => statusFor(group).tone === 'info').length, 'DNS difference'), 'info')}`;
     document.querySelectorAll('[data-view]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.view === state.view)));
@@ -129,12 +141,12 @@
       const message = !state.overview ? state.loading || state.metadataLoading ? 'Loading snapshots...' : state.namespace === null && !state.namespaceError ? 'No accessible namespaces' : 'No snapshot available' : groups.length ? 'No resources match the selected filters' : C.list(state.overview.sites).some(item => !item.available) ? 'No resources received. Cluster reads are incomplete.' : 'No GSLB resources in this namespace';
       container.innerHTML = `<p class="k8gb-empty">${message}</p>`; return;
     }
-    container.innerHTML = state.view === 'rows' ? `<table class="k8gb-table k8gb-object-table"><caption class="k8gb-sr-only">GSLB resources</caption><thead><tr><th>GSLB / URL</th><th>Management</th><th>State</th><th>Applications</th><th>Policy / TTL</th><th>DNS targets</th></tr></thead><tbody>${visible.map(group => {
+    container.innerHTML = state.view === 'rows' ? `<table class="k8gb-table k8gb-object-table${editable ? ' selectable' : ''}"><caption class="k8gb-sr-only">GSLB resources</caption><thead><tr>${editable ? '<th class="k8gb-select-column"><span class="k8gb-sr-only">Selection</span></th>' : ''}<th>GSLB / URL</th><th>Management</th><th>State</th><th>Applications</th><th>Policy / TTL</th><th>DNS targets</th></tr></thead><tbody>${visible.map(group => {
       const status = statusFor(group), policy = policySummary(group);
-      return `<tr class="k8gb-object-row ${status.tone}"><td data-label="GSLB / URL">${groupLink(group)}<small>${h(group.hostname || 'Hostname not reported')}</small><small>${h(group.namespace)}</small></td><td data-label="Management">${managementSummary(group)}</td><td data-label="State">${badge(status.label, status.tone)}${signalsHTML(group)}</td><td data-label="Applications"><div class="k8gb-row-sites">${chipsHTML(group)}</div></td><td data-label="Policy / TTL">${h(policy.strategy)}<small>TTL ${h(policy.ttl)}</small></td><td data-label="DNS targets"><div class="k8gb-dns-targets">${allTargetsHTML(group)}</div></td></tr>`;
+      return `<tr class="k8gb-object-row ${status.tone}" data-selected="${state.selection.has(group.id)}">${editable ? `<td class="k8gb-select-column" data-label="Select">${selector(group)}</td>` : ''}<td data-label="GSLB / URL">${groupLink(group)}<small>${h(group.hostname || 'Hostname not reported')}</small><small>${h(group.namespace)}</small></td><td data-label="Management">${managementSummary(group)}</td><td data-label="State">${badge(status.label, status.tone)}${signalsHTML(group)}</td><td data-label="Applications"><div class="k8gb-row-sites">${chipsHTML(group)}</div></td><td data-label="Policy / TTL">${h(policy.strategy)}<small>TTL ${h(policy.ttl)}</small></td><td data-label="DNS targets"><div class="k8gb-dns-targets">${allTargetsHTML(group)}</div></td></tr>`;
     }).join('')}</tbody></table>` : visible.map(group => {
       const status = statusFor(group), policy = policySummary(group);
-      return `<article class="k8gb-tile ${status.tone}"><div class="k8gb-tile-main"><div class="k8gb-tile-status">${badge(status.label, status.tone)}<span class="k8gb-backend-count">${icon('boxes')}${h(endpointLabel(group))}</span></div>${groupLink(group)}<div class="k8gb-host">${h(group.hostname || 'Hostname not reported')}</div>${managementSummary(group)}${signalsHTML(group)}<div class="k8gb-row-sites">${chipsHTML(group)}</div><div class="k8gb-tile-config"><span>${icon('git-branch')}${h(policy.strategy)}</span><span>${icon('timer')}TTL ${h(policy.ttl)}</span></div><div class="k8gb-dns-targets"><span class="k8gb-muted">DNS</span>${allTargetsHTML(group)}</div></div><div class="k8gb-tile-footer"><span>${h(group.namespace)}${group.zone ? ` / ${h(group.zone)}` : ''}</span><a class="k8gb-detail-link" href="${h(C.groupHash(group.id))}" title="Open resource details" aria-label="Details for ${h(names(group))}">${icon('chevron-right')}</a></div></article>`;
+      return `<article class="k8gb-tile ${status.tone}" data-object-id="${h(group.id)}" data-selected="${state.selection.has(group.id)}"><div class="k8gb-tile-main"><div class="k8gb-tile-status">${selector(group)}${badge(status.label, status.tone)}<span class="k8gb-backend-count">${icon('boxes')}${h(endpointLabel(group))}</span></div>${groupLink(group)}<div class="k8gb-host">${h(group.hostname || 'Hostname not reported')}</div>${managementSummary(group)}${signalsHTML(group)}<div class="k8gb-row-sites">${chipsHTML(group)}</div><div class="k8gb-tile-config"><span>${icon('git-branch')}${h(policy.strategy)}</span><span>${icon('timer')}TTL ${h(policy.ttl)}</span></div><div class="k8gb-dns-targets"><span class="k8gb-muted">DNS</span>${allTargetsHTML(group)}</div></div><div class="k8gb-tile-footer"><span>${h(group.namespace)}${group.zone ? ` / ${h(group.zone)}` : ''}</span><a class="k8gb-detail-link" href="${h(C.groupHash(group.id))}" title="Open resource details" aria-label="Details for ${h(names(group))}">${icon('chevron-right')}</a></div></article>`;
     }).join('');
   }
   function groupLink(group) { return `<a class="k8gb-name" data-group-id="${h(group.id)}" href="${h(C.groupHash(group.id))}">${h(names(group))}</a>`; }
@@ -210,7 +222,28 @@
   }
   $('refresh').addEventListener('click', refresh);
   $('audit').addEventListener('click', () => mutations.openAudit());
-  $('namespace').addEventListener('change', event => { state.namespace = event.target.value; loadOverview(state.namespace); });
+  $('namespace').addEventListener('change', event => { state.selection.clear(); state.namespace = event.target.value; loadOverview(state.namespace); });
+  $('selectVisible').addEventListener('change', event => {
+    const context = mutationContext();
+    for (const group of C.filterGroups(C.list(state.overview?.groups),{query:$('search').value,warnings:$('warningsFilter').checked,dns:$('dnsFilter').checked}).filter(group => M.selectableGroup(context,group))) {
+      if (event.target.checked) state.selection.add(group.id); else state.selection.delete(group.id);
+    }
+    renderCatalog();
+  });
+  $('resources').addEventListener('change', event => {
+    const id = event.target.dataset.selectGroup;
+    if (!id) return;
+    if (event.target.checked) state.selection.add(id); else state.selection.delete(id);
+    renderCatalog(); $('resources').querySelector(`[data-select-group="${CSS.escape(id)}"]`)?.focus();
+  });
+  $('resources').addEventListener('contextmenu', event => {
+    const tile = event.target.closest('[data-object-id]');
+    if (!tile || !tile.querySelector('[data-select-group]') || event.target.closest('a,button,input')) return;
+    event.preventDefault();
+    const id = tile.dataset.objectId;
+    if (state.selection.has(id)) state.selection.delete(id); else state.selection.add(id);
+    renderCatalog();
+  });
   $('search').addEventListener('input', renderCatalog);
   $('warningsFilter').addEventListener('change', renderCatalog); $('dnsFilter').addEventListener('change', renderCatalog);
   $('theme').addEventListener('click', () => {
@@ -220,6 +253,9 @@
     renderTheme();
   });
   document.addEventListener('click', event => {
+    if (event.target.closest('[data-clear-selection]')) { state.selection.clear(); renderCatalog(); }
+    const bulk = event.target.closest('[data-bulk-operation]');
+    if (bulk && !bulk.disabled) mutations.openBulk(bulk.dataset.bulkOperation,C.list(state.overview?.groups).filter(group => state.selection.has(group.id)));
     if (event.target.closest('[data-create-native]')) mutations.open('native-create');
     if (event.target.closest('[data-enable-traefik]')) mutations.open('traefik-enable');
     const group = C.list(state.overview?.groups).find(item => item.id === state.selected);

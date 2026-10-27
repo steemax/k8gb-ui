@@ -2,7 +2,7 @@
 
 Standalone multi-cluster console for k8gb, read-only by default. Manage native
 Gslb resources or use the optional Traefik IngressRoute adapter.
-An independent project, not an official k8gb component. The initial 0.1.0 release
+An independent project, not an official k8gb component. The 0.1.x release line
 is a preview; review the deployment boundaries below before enabling writes.
 
 ## Choose a management mode
@@ -96,7 +96,7 @@ After preparing those files, an agent installation uses the **published chart**:
 
 ```sh
 helm --kube-context "$EAST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
-  --version 0.1.0 --namespace k8gb-ui --create-namespace \
+  --version 0.1.1 --namespace k8gb-ui --create-namespace \
   -f "$PRIVATE/agent.yaml" \
   --set-string agent.clusterID=east \
   --set-string agent.ingress.host=east-agent.example.test \
@@ -117,11 +117,13 @@ Images use one Docker Hub repository, `steemax/k8gb-ui`, with component tags:
 
 | Component | Image |
 | --- | --- |
-| Console | `steemax/k8gb-ui:0.1.0-console` |
-| Site agent | `steemax/k8gb-ui:0.1.0-agent` |
-| Optional webhook | `steemax/k8gb-ui:0.1.0-webhook` |
+| Console | `steemax/k8gb-ui:0.1.1-console` |
+| Site agent | `steemax/k8gb-ui:0.1.1-agent` |
+| Optional webhook | `steemax/k8gb-ui:0.1.1-webhook` |
 
-The matching 0.1.0 images and chart are published. The maintainer
+This checkout targets 0.1.1. Use the version-pinned commands after the matching
+images and chart have been published; confirm availability with `helm search repo`.
+See the [release notes](CHANGELOG.md) for changes. The maintainer
 [release guide](docs/releases.md) covers local builds, Docker Hub and publishing
 new chart versions. For an isolated end-to-end environment, use the
 [two-site DNS/auth lab](tests/dns-lab/README.md).
@@ -144,6 +146,9 @@ new chart versions. For an isolated end-to-end environment, use the
   side-effect-free admission and reconciliation after the source route commits.
 - Operational traffic API: reversible per-Gslb exposed-IP overrides, plus
   exclude/include of an adapter-owned global site without deleting its GSLB.
+- Administrator bulk site exclusion and inclusion from selected cards or rows:
+  fresh-state previews, cluster selection, explicit skipped targets and per-resource
+  results. Shared routes are deduplicated; each batch is limited to 32 routing targets.
 - Separately enabled native Ingress exclusion with explicit local-routing impact
   consent and snapshot-guarded restoration; no duplicate-host companion Ingress.
 - Explicit Direct Gslb / Webhook-Traefik management labels and write targets in
@@ -233,7 +238,7 @@ make build
 make test
 go vet ./...
 go mod verify
-make images VERSION=0.1.0
+make images VERSION=0.1.1
 make chart
 ```
 

@@ -89,10 +89,14 @@
     }
     return policy;
   }
-  function buildTargets({context, mode, group, candidate, instances = [], name, policy, traefik, traffic, reason, dnsZone}) {
+  function reasonText(reason) {
     reason = String(reason || '').trim();
     if (!reason) throw new Error('A reason is required');
     if (new TextEncoder().encode(reason).length > 1024 || /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(reason)) throw new Error('Reason must be at most 1024 bytes without control characters');
+    return reason;
+  }
+  function buildTargets({context, mode, group, candidate, instances = [], name, policy, traefik, traffic, reason, dnsZone}) {
+    reason = reasonText(reason);
     let targets;
     if (mode.startsWith('traffic-') || ['traefik-excludeSite','traefik-includeSite','native-excludeSite','native-includeSite'].includes(mode)) {
       if (instances.length !== 1) throw new Error('Select exactly one observed object and site');
@@ -163,6 +167,45 @@
       if (target.request.resource.namespace !== context.namespace || target.request.target && target.request.target.namespace !== context.namespace || !can(context, target.clusterId, target.request.provider, target.request.operation, candidate?.catalog)) throw new Error('This operation is not authorized in the current namespace and cluster');
     }
     return clone(targets);
+  }
+  function selectableGroup(context, group) {
+    return C.list(group?.instances).some(instance => ['native','traefik'].includes(C.management(instance).mode) && ['excludeSite','includeSite'].some(operation => can(context,instance.clusterId,C.management(instance).mode,operation)));
+  }
+  function buildSiteBatch({context, groups, candidates, clusterIds, operation, reason}) {
+    if (!['excludeSite','includeSite'].includes(operation)) throw new Error('Select a site exclusion or inclusion operation');
+    reason = reasonText(reason);
+    if (!C.list(groups).length || !C.list(clusterIds).length) throw new Error('Select at least one object and cluster');
+    const targets = [], skipped = [], seen = new Map(), selectedClusters = new Set(clusterIds);
+    const skip = (group, clusterId, message) => skipped.push({groupId:group.id,hostname:group.hostname || '',clusterId,reason:message});
+    for (const selected of groups) {
+      const group = C.list(context?.overview?.groups).find(row => row.id === selected.id && row.hostname === selected.hostname);
+      for (const clusterId of selectedClusters) {
+        const instances = C.list(group?.instances).filter(instance => instance.clusterId === clusterId);
+        if (!instances.length) { skip(selected,clusterId,'No observed object in this cluster'); continue; }
+        for (const instance of instances) {
+          const previous = C.list(selected.instances).find(row => row.clusterId === clusterId && sameResource(row.resource,instance.resource));
+          const provider = C.management(instance).mode;
+          if (!previous || C.management(previous).mode !== provider || !!previous.source !== !!instance.source || previous.source && !sameResource(previous.source,instance.source) || !!previous.target !== !!instance.target || previous.target && !sameResource(previous.target,instance.target)) { skip(selected,clusterId,'Resource identity or management changed; reselect the object'); continue; }
+          if (!['native','traefik'].includes(provider) || !can(context,clusterId,provider,operation)) { skip(selected,clusterId,'Cluster unavailable or operation not authorized'); continue; }
+          const matches = C.list(candidates).filter(candidate => siteCandidate(context,group,instance,candidate));
+          if (matches.length !== 1) { skip(selected,clusterId,'No unambiguous, eligible routing resource in the fresh catalog'); continue; }
+          const candidate = matches[0];
+          if (typeof candidate.traffic?.excluded !== 'boolean') { skip(selected,clusterId,'Current requested exclusion state is unavailable'); continue; }
+          if (operation !== exclusionOperation(instance,candidate)) { skip(selected,clusterId,operation === 'includeSite' ? 'Already included' : 'Already excluded'); continue; }
+          let target;
+          try { [target] = buildTargets({context,group,candidate,mode:`${provider}-${operation}`,instances:[instance],reason}); }
+          catch (error) { skip(selected,clusterId,error.message); continue; }
+          const key = JSON.stringify([clusterId,...refKeys.slice(0,4).map(key => target.request.resource[key])]);
+          if (seen.has(key)) {
+            if (requestSignature(seen.get(key).request) !== requestSignature(target.request)) throw new Error('Conflicting operations reference the same routing resource; review these objects separately');
+            skip(selected,clusterId,'Shared routing resource already selected; all its hosts are affected'); continue;
+          }
+          seen.set(key,target); targets.push(target);
+        }
+      }
+    }
+    if (targets.length > 32) throw new Error(`Selected ${targets.length} routing targets. Select at most 32 targets per batch; no changes were submitted.`);
+    return {targets,skipped};
   }
   function commonSecurity(candidates) {
     const rows = C.list(candidates), catalogs = rows.map(candidate => candidate.catalog?.traefikSecurity);
@@ -381,6 +424,7 @@
       workspace.addEventListener('submit', event => event.preventDefault());
       workspace.addEventListener('input', event => {
         if (!event.target.closest('#mutationForm')) return;
+        if (editor.bulk && event.target.id === 'mutationReason') editor.reason = event.target.value;
         if (event.target.id === 'mutationHostLabel') updateCreationHostname();
         if (event.target.id === 'mutationMTLS' && event.target.checked) $('mutationCNDetails').open = true;
         planner.invalidate(); updateStrategy(); renderPreview();
@@ -388,6 +432,11 @@
       workspace.addEventListener('change', event => {
         const id = event.target.id;
         if (event.target.closest('#mutationForm')) { planner.invalidate(); renderPreview(); }
+        if (editor.bulk && event.target.dataset.bulkCluster) {
+          if (event.target.checked) editor.selectedClusters.add(event.target.dataset.bulkCluster);
+          else editor.selectedClusters.delete(event.target.dataset.bulkCluster);
+          renderBulkSummary();
+        }
         if (id === 'mutationCandidate') { editor.selected = Number(event.target.value); seed(); renderForm(); }
         if (id === 'mutationDNSZone') {
           editor.zone = event.target.value;
@@ -561,6 +610,55 @@
       if (typeof candidate?.traffic?.excluded === 'boolean' && candidate.traffic.excluded !== C.isExcluded(instance)) $('mutationForm').insertAdjacentHTML('afterbegin', `<p class="k8gb-notice">Requested site state in the fresh source catalog: ${candidate.traffic.excluded ? 'Excluded' : 'Included'}; observed Gslb state: ${C.isExcluded(instance) ? 'Excluded' : 'Included'}. Reconciliation is pending. This operation uses the fresh source state.</p>`);
       renderPreview();
     }
+    function bulkBatch(reason = 'Review selected traffic operations') {
+      return buildSiteBatch({context:editor.bulkContext,groups:editor.groups,candidates:editor.candidates,clusterIds:[...editor.selectedClusters],operation:editor.operation,reason});
+    }
+    function renderBulkSummary() {
+      const summary = $('mutationBulkSummary');
+      if (!summary) return;
+      try {
+        const batch = bulkBatch();
+        summary.innerHTML = `<h3>${batch.targets.length} routing targets / ${batch.skipped.length} skipped</h3>${batch.targets.length ? `<div class="k8gb-table-wrap"><table class="k8gb-table"><thead><tr><th>Cluster</th><th>Routing resource</th><th>Management</th></tr></thead><tbody>${batch.targets.map(target => `<tr><td>${h(clusterName(target.clusterId))}</td><td><code>${h(target.request.resource.kind)} / ${h(target.request.resource.name)}</code></td><td>${target.request.provider === 'native' ? 'Direct Gslb' : 'Webhook / Traefik'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="k8gb-muted">No eligible state changes on the selected clusters.</p>'}${batch.skipped.length ? `<details class="k8gb-technical" open><summary>Skipped (${batch.skipped.length})</summary><ul class="k8gb-issues">${batch.skipped.map(row => `<li>${h(row.hostname)} / ${h(clusterName(row.clusterId))}: ${h(row.reason)}</li>`).join('')}</ul></details>` : ''}`;
+      } catch (error) { summary.innerHTML = `<p class="k8gb-error">${h(error.message)}</p>`; }
+    }
+    function renderBulkForm() {
+      $('mutationForm').innerHTML = `<section class="k8gb-section"><h3>Target clusters</h3><div class="k8gb-bulk-sites">${C.list(getContext().overview?.sites).map(site => {
+        const id = site.cluster.id, allowed = ['native','traefik'].some(provider => can(getContext(),id,provider,editor.operation));
+        return `<label class="k8gb-check"><input type="checkbox" data-bulk-cluster="${h(id)}"${editor.selectedClusters.has(id) ? ' checked' : ''}${allowed ? '' : ' disabled'}>${icon('server')}<strong>${h(clusterName(id))}</strong>${allowed ? '' : '<span class="k8gb-muted">Unavailable / read-only</span>'}</label>`;
+      }).join('')}</div></section><p class="k8gb-notice">${editor.operation === 'excludeSite' ? 'Exclude selected sites without deleting GSLB.' : 'Return excluded sites to GSLB traffic.'} Changes affect every host and path of each routing resource. Multi-cluster apply is not atomic; DNS convergence is asynchronous. No automatic rollback or retry.</p><div id="mutationBulkSummary"></div><label class="k8gb-label" for="mutationReason">Reason (required)</label><textarea id="mutationReason" required rows="2" maxlength="1024">${h(editor.reason || '')}</textarea><div class="k8gb-row">${button('preview','Preview changes','scan-eye','k8gb-primary')}</div>`;
+      if (editor.operation === 'excludeSite' && editor.groups.some(group => C.list(group.instances).some(instance => C.management(instance).mode === 'native'))) $('mutationForm').insertAdjacentHTML('afterbegin','<p class="k8gb-error"><strong>Native Ingress: local routing will also stop</strong>Exclusion changes the working Ingress backend for all its hosts and paths. Including the site restores the managed snapshot. Application Services are not deleted.</p>');
+      renderBulkSummary(); renderPreview();
+    }
+    async function openBulk(operation, groups) {
+      if (applying() || !['excludeSite','includeSite'].includes(operation) || !groups?.length || !hasEdits(getContext(),{native:[operation],traefik:[operation]})) return;
+      mount(); opener = document.activeElement; clearInterval(timer); catalogRequest.cancel(); auditRequest.cancel(); diagram?.unmount();
+      if (audit) audit.hidden = true;
+      planner = createPlanner();
+      editor = {bulk:true,operational:true,operation,groups:clone(groups),namespace:getContext().namespace,selectedClusters:new Set(C.list(getContext().overview?.sites).filter(site => ['native','traefik'].some(provider => can(getContext(),site.cluster.id,provider,operation))).map(site => site.cluster.id)),candidates:[],reason:'',referenceLoading:true};
+      const currentEditor = editor;
+      workspace.innerHTML = `<div class="k8gb-editor-heading">${button('close','Close','arrow-left')}<div><p class="k8gb-eyebrow">${h(editor.namespace)} / ${groups.length} selected objects</p><h2 id="mutationHeading" tabindex="-1">${operation === 'includeSite' ? 'Include selected sites' : 'Exclude selected sites'}</h2></div></div><div id="mutationWarnings"></div><p id="mutationError" class="k8gb-error" role="alert" hidden></p><div class="k8gb-editor-layout operational"><fieldset id="mutationForm" class="k8gb-mutation-form"><p role="status">Loading current routing state...</p></fieldset></div><div id="mutationPreview" aria-live="polite"></div>`;
+      workspace.hidden = false; onViewChange('edit'); $('mutationHeading').focus(); timer = setInterval(updateApply,1000);
+      const loaded = await loadBulkState(currentEditor);
+      if (editor === currentEditor && editing()) {
+        if (loaded) { renderBulkForm(); $('mutationReason').focus(); }
+        else $('mutationForm').innerHTML = '<p class="k8gb-muted">Current routing state unavailable.</p>';
+      }
+    }
+    async function loadBulkState(currentEditor) {
+      const context = getContext();
+      currentEditor.referenceLoading = true;
+      try {
+        const latest = C.validateOverview(await C.getJSON(`/api/v1/overview?${new URLSearchParams({namespace:context.namespace})}`));
+        const data = await C.getJSON(`/api/v1/catalog?${new URLSearchParams({namespace:context.namespace})}`);
+        if (editor !== currentEditor || !editing() || context.namespace !== getContext().namespace || context.overview !== getContext().overview || getContext().stale) return false;
+        if (latest.namespace !== context.namespace || data?.namespace !== context.namespace || !Array.isArray(data.sites)) throw new Error('Invalid bulk catalog scope');
+        currentEditor.bulkContext = {...context,overview:latest};
+        currentEditor.candidates = data.sites.flatMap(site => C.list(site.catalog?.candidates).map(candidate => ({...candidate,clusterId:site.clusterId,catalog:site.catalog})));
+        $('mutationWarnings').innerHTML = data.sites.flatMap(site => [site.error ? `${site.clusterId}: ${site.error}` : '',...C.list(site.catalog?.warnings)]).filter(Boolean).map(warning => `<p class="k8gb-notice">${h(warning)}</p>`).join('');
+        return true;
+      } catch (error) { if (editor === currentEditor && editing()) showError(error.message); return false; }
+      finally { if (editor === currentEditor) currentEditor.referenceLoading = false; }
+    }
     function updateStrategy() {
       if (!$('mutationStrategy')) return;
       $('mutationPrimaryField').hidden = $('mutationStrategy').value !== 'failover'; $('mutationWeights').hidden = $('mutationStrategy').value !== 'weightedRoundRobin';
@@ -580,6 +678,18 @@
       if (editor.referenceLoading || ['planning','applying','unknown','finished'].includes(planner.state.status)) return;
       try {
         showError('');
+        if (editor.bulk) {
+          editor.reason = reasonText($('mutationReason').value);
+          planner.invalidate();
+          const loaded = loadBulkState(currentEditor); renderPreview();
+          if (!await loaded || editor !== currentEditor || !editing()) { if (editor === currentEditor && editing()) $('mutationForm').disabled = false; return; }
+          const batch = bulkBatch(editor.reason); renderBulkSummary();
+          if (!batch.targets.length) throw new Error('No eligible state changes. Review skipped objects or choose other clusters.');
+          editor.bulkTargets = batch.targets;
+          const pending = planner.plan(batch.targets); renderPreview(); await pending; renderPreview();
+          if (editor === currentEditor && editing() && planner.state.batch) $('mutationPreview').scrollIntoView({block:'start'});
+          return;
+        }
         const policy = editor.operational ? undefined : readPolicy();
         const candidate = editor.candidates?.[editor.selected];
         if (editor.multi && (selectedCandidates().length !== editor.selectedClusters.size || selectedCandidates().some(candidate => !selectableCandidate(candidate)))) throw new Error('Every selected cluster must have an available, authorized resource');
@@ -612,6 +722,10 @@
       if (rows.length > 1) $('mutationPreview').insertAdjacentHTML('afterbegin','<p class="k8gb-notice">Multi-cluster apply is not atomic. Review the result for every selected cluster; a failed cluster is not rolled back or retried automatically.</p>');
       if (rows.some(row => row.plan?.request.operation === 'excludeSite')) $('mutationDisableConsent').parentElement.lastChild.textContent = 'I confirm excluding this site from traffic, without deleting GSLB; Include site reverses this exclusion';
       if (rows.some(row => row.plan?.request.provider === 'native' && row.plan.request.operation === 'excludeSite')) $('mutationConsent').parentElement.insertAdjacentHTML('beforebegin','<label class="k8gb-check k8gb-disable-consent"><input id="mutationLocalConsent" type="checkbox">I understand that local routing through this native Ingress will stop for ALL hosts and HTTP paths, not only DNS traffic</label>');
+      if (editor.bulk) $('mutationPreview').querySelectorAll('.k8gb-plan-target').forEach((section,index) => {
+        const target = editor.bulkTargets?.[index], resource = target?.request.resource;
+        if (resource && (state.result || rows[index]?.error)) section.querySelector('h4').insertAdjacentHTML('afterend',`<p class="k8gb-mono">${h(resource.kind)} ${h(resource.namespace)}/${h(resource.name)}</p>`);
+      });
       updateApply();
     }
     function updateApply() {
@@ -623,6 +737,13 @@
     }
     function authorizedPlan() {
       const context = getContext(), rows = C.list(planner?.state.batch?.targets);
+      if (editor.bulk) {
+        try {
+          if (!hasEdits(context,{native:[editor.operation],traefik:[editor.operation]}) || context.namespace !== editor.namespace || context.stale) return false;
+          const targets = bulkBatch(editor.reason).targets;
+          return rows.length === targets.length && rows.length > 0 && rows.every((row,index) => row.clusterId === targets[index].clusterId && (row.error || requestSignature(row.plan?.request) === requestSignature(targets[index].request))) && targets.every(target => can(context,target.clusterId,target.request.provider,target.request.operation));
+        } catch (_) { return false; }
+      }
       if (editor.operational) {
         try {
           for (const row of rows.filter(row => !row.error)) buildTargets({context, group:editor.group, mode:editor.mode, instances:[editor.instance], candidate:editor.candidates[editor.selected], traffic:row.plan?.request.traffic, reason:row.plan?.request.reason});
@@ -800,7 +921,7 @@
       const tone = event.outcomeUnknown || status.endsWith('_failed') || ['failed','error','denied'].includes(status) ? 'warning' : ['applied','noop'].includes(status) ? 'consistent' : 'unknown';
       return `<details class="k8gb-plan-target k8gb-audit-event" data-audit-status="${h(status)}"${event.outcomeUnknown ? ' open' : ''}><summary><span class="k8gb-audit-time">${h(C.formatTime(event.time))}</span><span><strong>${h(event.provider)} / ${h(event.operation)}</strong><span class="k8gb-audit-ref">${h(clusterName(event.clusterId))} / ${h(event.resource.kind)} ${h(event.resource.name)}</span><span class="k8gb-audit-reason">${h(event.reason)}</span></span><span class="k8gb-audit-actor">${h(event.actor || 'Not reported')}</span><span class="k8gb-state ${tone}">${h(auditLabels.status[status] || status)}${event.outcomeUnknown ? ' / Outcome unknown' : ''}</span></summary><p class="k8gb-mono">${h(refLabel(event.clusterId,event.resource))}</p>${changesHTML(event.changes)}</details>`;
     }
-    return {open, openAudit, close, actions, trafficActions, prepareTraffic, get active() { return editing() ? 'edit' : auditing() ? 'audit' : null; }, get applying() { return applying(); }, contextChanged() { if (editing() && !['applying','unknown','finished'].includes(planner?.state.status)) { planner?.invalidate(); if (editor.namespace !== getContext().namespace || !hasEdits(getContext())) close(); else renderPreview(); } if (auditing()) close(); }, destroy() { clearInterval(timer); catalogRequest.cancel(); auditRequest.cancel(); trafficRequest.cancel(); diagram?.unmount(); }};
+    return {open, openBulk, openAudit, close, actions, trafficActions, prepareTraffic, get active() { return editing() ? 'edit' : auditing() ? 'audit' : null; }, get applying() { return applying(); }, contextChanged() { if (editing() && !['applying','unknown','finished'].includes(planner?.state.status)) { planner?.invalidate(); if (editor.namespace !== getContext().namespace || !hasEdits(getContext())) close(); else renderPreview(); } if (auditing()) close(); }, destroy() { clearInterval(timer); catalogRequest.cancel(); auditRequest.cancel(); trafficRequest.cancel(); diagram?.unmount(); }};
   }
-  return {allows, can, hasEdits, nativeInstances, reference, sameResource, validateIPs, validatePolicy, commonSecurity, buildTargets, matchingCandidates, buildCatalogBatch, zonesFor, commonZones, inZone, draftDNSInput, refreshGslbTargets, requestSignature, diffRows, queryAudit, postJSON, createPlanner, createView};
+  return {allows, can, hasEdits, nativeInstances, selectableGroup, buildSiteBatch, reference, sameResource, validateIPs, validatePolicy, commonSecurity, buildTargets, matchingCandidates, buildCatalogBatch, zonesFor, commonZones, inZone, draftDNSInput, refreshGslbTargets, requestSignature, diffRows, queryAudit, postJSON, createPlanner, createView};
 });

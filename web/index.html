@@ -44,11 +44,18 @@
         <div class="k8gb-search"><label for="search" class="k8gb-sr-only">Search name, URL, service or IP</label><i data-lucide="search" aria-hidden="true"></i><input id="search" type="search" placeholder="Name, URL, service or IP" autocomplete="off" spellcheck="false"></div>
         <label class="k8gb-check"><input id="warningsFilter" type="checkbox">Warnings</label>
         <label class="k8gb-check"><input id="dnsFilter" type="checkbox">DNS differences</label>
+        <label id="selectionControl" class="k8gb-check" hidden><input id="selectVisible" type="checkbox">Select visible</label>
         <span class="k8gb-spacer"></span>
         <div class="k8gb-view-toggle" role="group" aria-label="Resource view">
           <button type="button" class="k8gb-button k8gb-icon-button" data-view="cards" aria-pressed="true" aria-label="Card view" title="Card view"><i data-lucide="layout-grid" aria-hidden="true"></i></button>
           <button type="button" class="k8gb-button k8gb-icon-button" data-view="rows" aria-pressed="false" aria-label="Row view" title="Row view"><i data-lucide="list" aria-hidden="true"></i></button>
         </div>
+      </div>
+      <div id="selectionBar" class="k8gb-selection" role="region" aria-label="Selected resource actions" hidden>
+        <strong id="selectionCount" aria-live="polite"></strong><span class="k8gb-spacer"></span>
+        <button type="button" class="k8gb-button k8gb-danger" data-bulk-operation="excludeSite"><i data-lucide="circle-minus" aria-hidden="true"></i>Exclude sites</button>
+        <button type="button" class="k8gb-button" data-bulk-operation="includeSite"><i data-lucide="circle-check" aria-hidden="true"></i>Include sites</button>
+        <button type="button" class="k8gb-button k8gb-icon-button" data-clear-selection aria-label="Clear selection" title="Clear selection"><i data-lucide="x" aria-hidden="true"></i></button>
       </div>
       <div id="resources" class="k8gb-grid" aria-busy="true"><p class="k8gb-empty">Loading snapshots...</p></div>
     </section>

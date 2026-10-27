@@ -7,8 +7,9 @@ adapts Traefik IngressRoutes; native Gslb management does not require Traefik.
 
 This guide uses two sites, `east` and `west`, with application namespace `catalog`.
 Replace the contexts, GeoTags, namespace, controller locator, ingress class and
-all `.example.test` names with your own. The commands use the published **0.1.0**
-chart and Docker Hub images, not a local build.
+all `.example.test` names with your own. The commands target the **0.1.1** chart
+and Docker Hub images, not a local build. Run them after the matching artifacts
+are published, and confirm the chart version with `helm search repo` first.
 
 ## Choose your deployment
 
@@ -155,11 +156,11 @@ resolve Secret/ConfigMap-backed environment values. See
 
 ```sh
 helm --kube-context "$EAST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
-  --version 0.1.0 -n k8gb-ui --create-namespace -f "$PRIVATE/agent.yaml" \
+  --version 0.1.1 -n k8gb-ui --create-namespace -f "$PRIVATE/agent.yaml" \
   --set-string agent.clusterID=east \
   --set-string agent.ingress.host=east-agent.example.test --wait --timeout 5m
 helm --kube-context "$WEST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
-  --version 0.1.0 -n k8gb-ui --create-namespace -f "$PRIVATE/agent.yaml" \
+  --version 0.1.1 -n k8gb-ui --create-namespace -f "$PRIVATE/agent.yaml" \
   --set-string agent.clusterID=west \
   --set-string agent.ingress.host=west-agent.example.test --wait --timeout 5m
 ```
@@ -275,11 +276,11 @@ options still install agents in both sites.
 
 ```sh
 helm --kube-context "$EAST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
-  --version 0.1.0 -n k8gb-ui -f "$PRIVATE/agent.yaml" -f "$PRIVATE/console.yaml" \
+  --version 0.1.1 -n k8gb-ui -f "$PRIVATE/agent.yaml" -f "$PRIVATE/console.yaml" \
   --set-string agent.clusterID=east \
   --set-string agent.ingress.host=east-agent.example.test --wait --timeout 5m
 helm --kube-context "$WEST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
-  --version 0.1.0 -n k8gb-ui -f "$PRIVATE/agent.yaml" -f "$PRIVATE/console.yaml" \
+  --version 0.1.1 -n k8gb-ui -f "$PRIVATE/agent.yaml" -f "$PRIVATE/console.yaml" \
   --set-string agent.clusterID=west \
   --set-string agent.ingress.host=west-agent.example.test \
   --set console.enabled="$CONSOLE_IN_WEST" --wait --timeout 5m
@@ -386,13 +387,13 @@ the write and Traefik overlays:
 
 ```sh
 helm --kube-context "$EAST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
-  --version 0.1.0 -n k8gb-ui -f "$PRIVATE/agent.yaml" -f "$PRIVATE/console.yaml" \
+  --version 0.1.1 -n k8gb-ui -f "$PRIVATE/agent.yaml" -f "$PRIVATE/console.yaml" \
   -f "$PRIVATE/writes.yaml" -f "$PRIVATE/traefik.yaml" \
   --set-file webhook.caBundle="$PRIVATE/webhook-ca.b64" \
   --set-string agent.clusterID=east \
   --set-string agent.ingress.host=east-agent.example.test --wait --timeout 5m
 helm --kube-context "$WEST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
-  --version 0.1.0 -n k8gb-ui -f "$PRIVATE/agent.yaml" -f "$PRIVATE/console.yaml" \
+  --version 0.1.1 -n k8gb-ui -f "$PRIVATE/agent.yaml" -f "$PRIVATE/console.yaml" \
   -f "$PRIVATE/writes.yaml" -f "$PRIVATE/traefik.yaml" \
   --set-file webhook.caBundle="$PRIVATE/webhook-ca.b64" \
   --set-string agent.clusterID=west \

@@ -7,7 +7,7 @@ name: Publish images
         description: Application version matching Chart.yaml appVersion (no v prefix)
         type: string
         required: true
-        default: "0.1.0"
+        default: "0.1.1"
 
 permissions:
   contents: read
