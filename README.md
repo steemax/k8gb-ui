@@ -96,7 +96,7 @@ After preparing those files, an agent installation uses the **published chart**:
 
 ```sh
 helm --kube-context "$EAST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
-  --version 0.1.1 --namespace k8gb-ui --create-namespace \
+  --version 0.1.2 --namespace k8gb-ui --create-namespace \
   -f "$PRIVATE/agent.yaml" \
   --set-string agent.clusterID=east \
   --set-string agent.ingress.host=east-agent.example.test \
@@ -117,11 +117,11 @@ Images use one Docker Hub repository, `steemax/k8gb-ui`, with component tags:
 
 | Component | Image |
 | --- | --- |
-| Console | `steemax/k8gb-ui:0.1.1-console` |
-| Site agent | `steemax/k8gb-ui:0.1.1-agent` |
-| Optional webhook | `steemax/k8gb-ui:0.1.1-webhook` |
+| Console | `steemax/k8gb-ui:0.1.2-console` |
+| Site agent | `steemax/k8gb-ui:0.1.2-agent` |
+| Optional webhook | `steemax/k8gb-ui:0.1.2-webhook` |
 
-This checkout targets 0.1.1. Use the version-pinned commands after the matching
+This checkout targets 0.1.2. Use the version-pinned commands after the matching
 images and chart have been published; confirm availability with `helm search repo`.
 See the [release notes](CHANGELOG.md) for changes. The maintainer
 [release guide](docs/releases.md) covers local builds, Docker Hub and publishing
@@ -135,6 +135,8 @@ new chart versions. For an isolated end-to-end environment, use the
 - Native Gslb resources, without Traefik or a custom admission webhook.
 - Compact cards and rows, search, namespace selection, per-cluster details,
   policy comparison, informational DNS-count differences and DNS animation.
+- DNS diagrams retain excluded-site nodes but omit them from modeled answers,
+  weighted shares and failover/GeoIP destinations, including unsaved policy previews.
 - Explicit cluster/zone/GeoTag registry; no infrastructure-specific hostnames,
   public IP mapping, namespace-owner rules or external asset/CDN dependency.
 - Generic OIDC or built-in password accounts with shared cluster/namespace access bindings; read-only
@@ -238,7 +240,7 @@ make build
 make test
 go vet ./...
 go mod verify
-make images VERSION=0.1.1
+make images VERSION=0.1.2
 make chart
 ```
 

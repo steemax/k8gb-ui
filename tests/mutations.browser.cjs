@@ -29,21 +29,26 @@ const groups = [{id:'app/web.example.test',namespace:'app',hostname:'web.example
   try {
     browser = await chromium.launch({headless:true});
     const errors = [], contexts = [];
-    async function fixture({readOnly = false, demo = false, fake = false, mobile = false, traffic = {}, catalog = {}, withLocal = false, sourceOwned = true, siteDenied = false, nativePolicy, synchronized = false, nativeSite = false, zoneSets, securityConfig = {}} = {}) {
+    async function fixture({readOnly = false, demo = false, fake = false, mobile = false, traffic = {}, catalog = {}, withLocal = false, sourceOwned = true, siteDenied = false, nativePolicy, synchronized = false, nativeSite = false, zoneSets, securityConfig = {}, excludedSites, requestedExcludedSites, managedBothSites = false} = {}) {
       const context = await browser.newContext({viewport:mobile ? {width:390,height:844} : {width:1440,height:1000},isMobile:mobile}); contexts.push(context);
       const page = await context.newPage(); page.on('pageerror',error => errors.push(error.message));
-      const calls = {plans:[],applies:[],gets:[],partial:false,expired:false,unknown:false,traffic:{excluded:false,ips:['192.0.2.1'],hostnames:['origin.example.test'],overrideManaged:false,overrideConflict:false,...traffic},catalog:{siteTrafficEligible:true,...catalog}};
+      const calls = {plans:[],applies:[],gets:[],partial:false,expired:false,unknown:false,excludedSites,requestedExcludedSites,traffic:{excluded:false,ips:['192.0.2.1'],hostnames:['origin.example.test'],overrideManaged:false,overrideConflict:false,...traffic},catalog:{siteTrafficEligible:true,...catalog}};
       const capabilities = () => { const value=readOnly ? {...caps(),readOnly:true} : fake ? {readOnly:false,providers:['native','traefik']} : caps(); if(nativeSite && value.operations) value.operations.native.push('excludeSite','includeSite'); return value; };
       const siteCapabilities = () => { const value = capabilities(); if (siteDenied && value.operations) { value.operations.traffic = []; value.operations.traefik = ['enable','update','deactivate']; } return value; };
       function observedGroups() {
         const rows = structuredClone(groups);
+        if (managedBothSites) {
+          const west = {...structuredClone(derived),clusterId:'west',geoTag:'west',resource:ref('Gslb','generated-web','west'),source:ref('IngressRoute','managed-route','west')};
+          delete west.source.resourceVersion; rows[1].instances.push(west);
+        }
         if (nativePolicy) rows[0].instances.forEach(instance => { instance.policy = {...nativePolicy}; });
         for (const group of rows) for (const instance of group.instances) {
           if (calls.freshGslbRV) instance.resource.resourceVersion = calls.freshGslbRV;
           instance.traffic = structuredClone(calls.traffic);
-          if(nativeSite && !instance.source && calls.traffic.excluded) instance.health='Excluded';
+          if (Array.isArray(calls.excludedSites)) instance.traffic.excluded = calls.excludedSites.includes(instance.clusterId);
+          if(nativeSite && !instance.source && instance.traffic.excluded) instance.health='Excluded';
           if (instance.source && !sourceOwned) delete instance.source;
-          if (instance.source && calls.traffic.excluded) { instance.health = 'Excluded'; instance.dnsObserved = false; instance.dnsTargets = []; instance.backends = [{namespace:'app',service:'synthetic-missing',health:'Excluded',endpointDataAvailable:false},{namespace:'app',service:'real-broken',health:'NotFound',endpointDataAvailable:false}]; }
+          if (instance.source && instance.traffic.excluded) { instance.health = 'Excluded'; instance.dnsObserved = false; instance.dnsTargets = []; instance.backends = [{namespace:'app',service:'synthetic-missing',health:'Excluded',endpointDataAvailable:false},{namespace:'app',service:'real-broken',health:'NotFound',endpointDataAvailable:false}]; }
         }
         if (withLocal) rows.push({id:'app/local.example.test',namespace:'app',hostname:'local.example.test',instances:[{...structuredClone(derived),resource:ref('Gslb','local-web'),hostname:'local.example.test',traffic:{excluded:false,ips:[],hostnames:[],overrideManaged:false,overrideConflict:false}}],signals:[],state:'consistent'});
         return rows;
@@ -62,6 +67,11 @@ const groups = [{id:'app/web.example.test',namespace:'app',hostname:'web.example
           site.catalog.dnsZones = {available:true,zones:zoneSets?.[site.clusterId] || ['example.test'],source:'Deployment system/k8gb / DNS_ZONES'};
           site.catalog.traefikSecurity = {entrypoints:['secure-client','websecure'],ordinaryEntrypoints:['websecure','grpc','grpctls'],pluginAlias:'certauthz',sanFilterConfigured:true,warnings:[],tlsOptions:[{resource:{...ref('IngressRoute','client-auth',site.clusterId),kind:'TLSOption'},eligible:true,clientAuthType:'RequireAndVerifyClientCert',caSecretNames:['client-ca']},{resource:{...ref('IngressRoute','weak-policy',site.clusterId),kind:'TLSOption'},eligible:false,clientAuthType:'RequireAnyClientCert',caSecretNames:[],reason:'Requires RequireAndVerifyClientCert'}],...securityConfig};
           for (const candidate of site.catalog.candidates) if (candidate.traefik?.mtls) Object.assign(candidate.traefik,{mtlsEntrypoint:'secure-client',tlsOption:{namespace:'app',name:'client-auth'}});
+          for (const candidate of site.catalog.candidates) {
+            if (managedBothSites && candidate.provider === 'traefik') { candidate.resource = ref('IngressRoute','managed-route',site.clusterId); candidate.enabled = true; }
+            const excluded = calls.requestedExcludedSites ?? calls.excludedSites;
+            if (Array.isArray(excluded)) candidate.traffic = {...candidate.traffic,excluded:excluded.includes(site.clusterId)};
+          }
         } return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(body)}); };
         if (request.method() === 'GET') calls.gets.push(url.pathname+url.search);
         if (url.pathname.endsWith('/clusters')) return reply({readOnly,clusters,demo});
@@ -531,6 +541,40 @@ const groups = [{id:'app/web.example.test',namespace:'app',hostname:'web.example
       assert.ok(await visual.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
       await visual.screenshot({path:path.join(bulkArtifacts,`preview-dark-${mobile?390:1440}.png`),fullPage:true});
     }
+    const dnsArtifacts=path.resolve(__dirname,'../artifacts/dns-exclusions');fs.mkdirSync(dnsArtifacts,{recursive:true});
+    const {page:excludedDNS,calls:excludedCalls}=await fixture({nativeSite:true,excludedSites:['west']});
+    await excludedDNS.getByRole('link',{name:'native-web',exact:true}).click();await excludedDNS.getByRole('tab',{name:'DNS Policy',exact:true}).click();
+    const reported=excludedDNS.locator('#k8gbPolicyDNS');
+    assert.equal(await reported.getAttribute('data-dns-excluded'),'["west"]');assert.equal(await reported.locator('[data-dns-node].excluded').count(),1);
+    assert.equal(await reported.locator('[data-dns-path].excluded.active').count(),0);assert.doesNotMatch(await reported.locator('[data-dns-answer]').innerText(),/west/);
+    await excludedDNS.getByRole('button',{name:'Edit GSLB policy',exact:true}).click();const excludedModel=excludedDNS.locator('#k8gbMutationDNS');
+    assert.equal(await excludedModel.getAttribute('data-dns-excluded'),'["west"]');
+    await excludedDNS.locator('#mutationStrategy').selectOption('weightedRoundRobin');await excludedDNS.locator('[data-weight-tag="east"]').fill('1');await excludedDNS.locator('[data-weight-tag="west"]').fill('99');
+    assert.match(await excludedModel.locator('[data-dns-stats]').innerText(),/east \/ 1 \/ 100%/);assert.match(await excludedModel.locator('[data-dns-stats]').innerText(),/west \/ 99 \/ Excluded/);
+    assert.equal(await excludedModel.locator('.k8gb-dns-allocation>span').count(),1);assert.doesNotMatch(await excludedModel.innerText(),/NaN|Infinity/);
+    await excludedDNS.locator('#mutationStrategy').selectOption('failover');await excludedDNS.locator('#mutationPrimary').fill('west');
+    assert.equal(await excludedModel.getAttribute('data-dns-phase'),'primary-excluded');assert.match(await excludedModel.locator('[data-dns-title]').innerText(),/Primary west is excluded/);
+    assert.equal(await excludedModel.locator('[data-dns-health="1"]').textContent(),'Primary / Excluded');assert.doesNotMatch(await excludedModel.locator('[data-dns-answer]').innerText(),/west/);
+    const excludedStep=await excludedModel.getAttribute('data-dns-step');await excludedDNS.waitForTimeout(3500);assert.notEqual(await excludedModel.getAttribute('data-dns-step'),excludedStep);assert.equal(await excludedModel.getAttribute('data-dns-phase'),'primary-excluded');
+    await excludedDNS.locator('#mutationTTL').fill('17');assert.equal(await excludedModel.getAttribute('data-dns-excluded'),'["west"]');assert.match(await excludedModel.locator('[data-dns-ttl]').innerText(),/17/);
+    for(const theme of ['light','dark']){await excludedDNS.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);assert.ok(await excludedDNS.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await excludedModel.screenshot({path:path.join(dnsArtifacts,`excluded-primary-${theme}-1440.png`)});}
+    await excludedDNS.getByRole('button',{name:'Close',exact:true}).click();excludedCalls.excludedSites=[];
+    await excludedDNS.getByRole('button',{name:'Refresh snapshots',exact:true}).click();await excludedDNS.waitForFunction(()=>document.querySelector('#k8gbPolicyDNS')?.dataset.dnsExcluded==='[]');
+    assert.equal(await reported.locator('[data-dns-node].excluded').count(),0);assert.match(await reported.locator('[data-dns-answer]').innerText(),/east[\s\S]*west|west[\s\S]*east/);
+    assert.equal(excludedCalls.plans.length,0);assert.equal(excludedCalls.applies.length,0,'DNS diagrams must not mutate routing');
+    const {page:pendingDNS}=await fixture({managedBothSites:true,excludedSites:[],requestedExcludedSites:['east']});
+    await pendingDNS.getByRole('link',{name:'managed-route',exact:true}).click();await pendingDNS.getByRole('button',{name:/Edit source IngressRoute \/ EAST/}).click();await pendingDNS.locator('#mutationStrategy').waitFor();
+    assert.equal(await pendingDNS.locator('#k8gbMutationDNS').getAttribute('data-dns-excluded'),'["east"]');
+    await pendingDNS.locator('#mutationStrategy').selectOption('failover');await pendingDNS.locator('#mutationPrimary').fill('east');assert.equal(await pendingDNS.locator('#k8gbMutationDNS').getAttribute('data-dns-phase'),'primary-excluded');
+    const {page:emptyDNS}=await fixture({nativeSite:true,excludedSites:['east','west'],readOnly:true});
+    await emptyDNS.getByRole('link',{name:'native-web',exact:true}).click();await emptyDNS.getByRole('tab',{name:'DNS Policy',exact:true}).click();const emptyModel=emptyDNS.locator('#k8gbPolicyDNS');
+    assert.equal(await emptyModel.getAttribute('data-dns-phase'),'empty');assert.equal(await emptyModel.locator('[data-dns-node].excluded').count(),2);assert.match(await emptyModel.locator('[data-dns-title]').innerText(),/No eligible sites/);
+    assert.equal(await emptyModel.locator('[data-dns-pause]').isDisabled(),true);assert.equal(await emptyModel.locator('[data-dns-packet]').getAttribute('hidden'),'');assert.equal(await emptyModel.locator('[data-dns-answer] .k8gb-dns-answer-tag').count(),0);
+    assert.ok(await emptyModel.locator('svg[role="img"]').evaluate(svg=>svg.getBBox().width>100));await emptyModel.screenshot({path:path.join(dnsArtifacts,'all-excluded-light-1440.png')});
+    const {page:excludedMobile}=await fixture({nativeSite:true,excludedSites:['west'],mobile:true});
+    await excludedMobile.getByRole('link',{name:'native-web',exact:true}).click();await excludedMobile.getByRole('button',{name:'Edit GSLB policy',exact:true}).click();await excludedMobile.locator('#mutationStrategy').selectOption('failover');await excludedMobile.locator('#mutationPrimary').fill('west');
+    const mobileModel=excludedMobile.locator('#k8gbMutationDNS');await mobileModel.scrollIntoViewIfNeeded();
+    for(const theme of ['light','dark']){await excludedMobile.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);assert.ok(await excludedMobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await mobileModel.screenshot({path:path.join(dnsArtifacts,`excluded-primary-${theme}-390.png`)});}
     assert.deepEqual(errors,[],'Browser exceptions');
     console.log('Mutation browser scenarios passed: existing mutations, traffic payloads/reason/reset/conflict, global-only exclusion/include, fresh catalog state/RV, strict eligibility/capabilities, read-only/demo denial, Excluded vs unrelated backend health, mobile layout.');
     for (const context of contexts) await context.close();

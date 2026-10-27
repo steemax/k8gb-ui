@@ -30,7 +30,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: webhook
-          image: steemax/k8gb-ui:0.1.1-webhook
+          image: steemax/k8gb-ui:0.1.2-webhook
           imagePullPolicy: IfNotPresent
           args:
             - --listen=:8443

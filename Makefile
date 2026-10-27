@@ -1,7 +1,7 @@
 .PHONY: build test vulncheck demo images image-smoke chart
 
 IMAGE_REPOSITORY ?= steemax/k8gb-ui
-VERSION ?= 0.1.1
+VERSION ?= 0.1.2
 
 build:
 	go build -trimpath -o bin/console ./cmd/console

@@ -266,9 +266,17 @@
   function draftDNSInput({group, sites, candidates, policy, hostname}) {
     const rows = C.list(group?.instances);
     const selectedSites = C.list(sites).filter(site => !candidates || candidates.some(candidate => candidate.clusterId === site.cluster?.id));
+    const siteStates = rows.length ? rows.map(row => {
+      const source = row.source || row.target;
+      const candidate = C.list(candidates).find(candidate => candidate.clusterId === row.clusterId && source && sameResource(source,candidate.resource));
+      return typeof candidate?.traffic?.excluded === 'boolean' ? {geoTag:row.geoTag,traffic:{excluded:candidate.traffic.excluded}} : row;
+    }) : selectedSites.flatMap(site => {
+      const candidate = C.list(candidates).find(candidate => candidate.clusterId === site.cluster.id);
+      return C.list(site.cluster.geoTags).map(geoTag => ({geoTag,traffic:candidate?.traffic}));
+    });
     return {context:`draft:${group?.id || 'create'}`,hostname:hostname || group?.hostname || candidateHosts(C.list(candidates)[0]).join(', '),cod:selectedSites.map(site => site.cluster.id).join(', '),
       tags:rows.length ? C.unique(rows.map(row => row.geoTag)) : C.unique(selectedSites.flatMap(site => C.list(site.cluster?.geoTags))),
-      mode:policy.strategy,primary:policy.primaryGeoTag || '',ttl:policy.dnsTtlSeconds,weights:policy.weights || {},draft:true};
+      excludedTags:C.dnsExcludedTags(siteStates),mode:policy.strategy,primary:policy.primaryGeoTag || '',ttl:policy.dnsTtlSeconds,weights:policy.weights || {},draft:true};
   }
   function refreshGslbTargets(targets, context, latest) {
     if (latest.namespace !== context.namespace) throw new Error('Fresh snapshot has a different namespace');

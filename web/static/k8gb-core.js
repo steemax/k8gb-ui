@@ -90,9 +90,13 @@
   function policySignature(policy) {
     return JSON.stringify([policy?.strategy || '', policy?.primaryGeoTag || '', Number(policy?.dnsTtlSeconds) || 0, Object.entries(policy?.weights || {}).sort(([a],[b]) => a.localeCompare(b))]);
   }
+  function dnsExcludedTags(instances) {
+    const rows = list(instances);
+    return unique(rows.map(row => row.geoTag)).filter(tag => rows.filter(row => row.geoTag === tag).every(isExcluded));
+  }
   function dnsInput(group, instance) {
     return {context:group.id, hostname:instance.hostname || group.hostname, cod:instance.clusterId,
-      tags:unique(list(group.instances).map(row => row.geoTag)), mode:instance.policy?.strategy,
+      tags:unique(list(group.instances).map(row => row.geoTag)), excludedTags:dnsExcludedTags(group.instances), mode:instance.policy?.strategy,
       primary:instance.policy?.primaryGeoTag || '', ttl:Number(instance.policy?.dnsTtlSeconds) > 0 ? instance.policy.dnsTtlSeconds : '', weights:instance.policy?.weights || {}};
   }
   function validateOverview(data) {
@@ -152,5 +156,5 @@
       throw error;
     } finally { clearTimeout(timer); signal?.removeEventListener('abort', cancel); }
   }
-  return {list, unique, escape, strategies, signalLabel, countLabel, health, isExcluded, instanceHealth, management, groupManagement, inventoryStatus, aggregateHealth, warningSignal, dnsSignal, hasWarnings, dnsDifference, groupStatus, searchText, filterGroups, endpointSummary, policyLabel, ttlLabel, policySignature, dnsInput, validateOverview, formatTime, groupFromHash, groupHash, initialNamespace, createLatestRequest, getJSON};
+  return {list, unique, escape, strategies, signalLabel, countLabel, health, isExcluded, instanceHealth, management, groupManagement, inventoryStatus, aggregateHealth, warningSignal, dnsSignal, hasWarnings, dnsDifference, groupStatus, searchText, filterGroups, endpointSummary, policyLabel, ttlLabel, policySignature, dnsExcludedTags, dnsInput, validateOverview, formatTime, groupFromHash, groupHash, initialNamespace, createLatestRequest, getJSON};
 });

@@ -11,8 +11,8 @@ It is licensed under [Apache-2.0](LICENSE).
 
 ## Images and chart repository
 
-All components use `steemax/k8gb-ui` with distinct tags: `0.1.1-console`,
-`0.1.1-agent`, `0.1.1-webhook`. The operator can override each component's
+All components use `steemax/k8gb-ui` with distinct tags: `0.1.2-console`,
+`0.1.2-agent`, `0.1.2-webhook`. The operator can override each component's
 `image.repository`, `image.tag` and `image.pullPolicy`, plus `imagePullSecrets`.
 
 The chart repository is hosted on GitHub Pages. Confirm that the requested
@@ -23,7 +23,7 @@ Pages URL, which need not match the Docker Hub account:
 helm repo add k8gb-ui https://steemax.github.io/k8gb-ui/
 helm repo update
 helm search repo k8gb-ui/k8gb-ui --versions
-helm upgrade --install ui k8gb-ui/k8gb-ui --version 0.1.1 \
+helm upgrade --install ui k8gb-ui/k8gb-ui --version 0.1.2 \
   -n k8gb-ui --create-namespace -f /absolute/private/console-values.yaml
 ```
 
@@ -57,7 +57,7 @@ pins its Go builder and nonroot runtime by digest. Never reuse a published versi
 tag for different content.
 
 ```sh
-make images VERSION=0.1.1
+make images VERSION=0.1.2
 helm lint charts/k8gb-ui -f charts/k8gb-ui/examples/builtin.yaml
 helm template ui charts/k8gb-ui -n k8gb-ui -f /absolute/private/console-values.yaml
 helm upgrade --install ui charts/k8gb-ui -n k8gb-ui --create-namespace \

@@ -8,7 +8,7 @@ rbac:
 console:
   enabled: true
   replicas: 1
-  image: {repository: steemax/k8gb-ui, tag: 0.1.1-console, pullPolicy: IfNotPresent}
+  image: {repository: steemax/k8gb-ui, tag: 0.1.2-console, pullPolicy: IfNotPresent}
   writesEnabled: false
   authSecretName: ""
   auth:
@@ -32,7 +32,7 @@ console:
 agent:
   enabled: false
   replicas: 1
-  image: {repository: steemax/k8gb-ui, tag: 0.1.1-agent, pullPolicy: IfNotPresent}
+  image: {repository: steemax/k8gb-ui, tag: 0.1.2-agent, pullPolicy: IfNotPresent}
   serviceAccountName: ""
   clusterID: ""
   namespaces: []
@@ -66,7 +66,7 @@ traefik:
 webhook:
   enabled: false
   replicas: 1
-  image: {repository: steemax/k8gb-ui, tag: 0.1.1-webhook, pullPolicy: IfNotPresent}
+  image: {repository: steemax/k8gb-ui, tag: 0.1.2-webhook, pullPolicy: IfNotPresent}
   serviceAccountName: ""
   tlsSecretName: ""
   # Base64 PEM CA for the certificate, with SAN <release>-webhook.<ns>.svc.

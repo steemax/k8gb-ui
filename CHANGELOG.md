@@ -3,6 +3,28 @@
 Versioned images and Helm charts are published separately through the manual
 [release workflows](docs/releases.md).
 
+## 0.1.2
+
+### Changed
+
+- DNS policy diagrams show manually excluded sites in both reported-policy and
+  unsaved-form views. Excluded sites remain visible but receive no modeled
+  answers; weighted shares, failover and GeoIP scenarios use eligible sites only.
+- Excluded sites use muted, dashed nodes and remain distinct from simulated
+  failures. An excluded failover primary stays excluded until explicitly included;
+  an all-excluded group displays a static "No eligible sites" state.
+- Creation/settings previews retain existing per-route exclusions and use the
+  matching fresh catalog state when an observed Gslb snapshot lags behind.
+- Added unit and browser coverage for all balancing modes, weighted shares,
+  exclusion/inclusion transitions, pending reconciliation and desktop/mobile themes.
+
+### Release
+
+- Chart version, appVersion, component image defaults, workflow input and install
+  examples target 0.1.2. Existing published versions are not replaced.
+- Agent/webhook behavior, mutation APIs, authentication, RBAC and configuration
+  are unchanged. No new credentials, permissions or migration are required.
+
 ## 0.1.1
 
 ### Added

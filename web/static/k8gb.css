@@ -246,6 +246,9 @@ body { margin:0; background:var(--ui-page-bg); color:var(--ui-text); font:14px/1
 .k8gb-dns-site { fill:var(--ui-blue-soft); stroke:var(--ui-border); stroke-width:1; }
 .k8gb-dns-site.k8gb-dns-series-1 { fill:var(--ui-success-soft); }
 .k8gb-dns-site.down { fill:var(--ui-warning-soft); }
+.k8gb-dns-site.excluded { fill:var(--ui-neutral-soft); stroke:var(--ui-muted); stroke-dasharray:4 3; }
+.k8gb-dns-wire.excluded { stroke-dasharray:5 4; }
+.k8gb-dns-exclusions { margin:10px 0; padding:7px 9px; border-left:2px solid var(--ui-muted); color:var(--ui-muted); background:var(--ui-neutral-soft); font-size:11px; overflow-wrap:anywhere; }
 .k8gb-dns-graphic .k8gb-dns-warning { fill:var(--k8gb-warning,#a65b07); }
 .k8gb-dns-packet { fill:var(--dns-series-0); stroke:var(--ui-surface); stroke-width:2; }
 .k8gb-dns-packet.k8gb-dns-series-1 { fill:var(--dns-series-1); }

@@ -11,7 +11,8 @@
   const icon = name => typeof window === 'object' && window.lucide ? window.lucide.createElement(window.lucide.icons[name === 'play' ? 'Play' : 'Pause'], {'aria-hidden':'true', width:16, height:16}).outerHTML : '';
   function normalize(input) {
     const tags = [...new Set((input.tags || []).filter(tag => typeof tag === 'string' && tag))];
-    const value = {context:String(input.context || ''), hostname:String(input.hostname || ''), cod:String(input.cod || ''), tags,
+    const excludedTags = tags.filter(tag => Array.isArray(input.excludedTags) && input.excludedTags.includes(tag));
+    const value = {context:String(input.context || ''), hostname:String(input.hostname || ''), cod:String(input.cod || ''), tags, excludedTags,
       mode:input.mode, primary:String(input.primary || ''), ttl:String(input.ttl ?? '').trim(), draft:input.draft === true, weights:{}};
     for (const tag of tags) value.weights[tag] = String(Object.hasOwn(input.weights || {},tag) ? input.weights[tag] : '0').trim();
     let error = '';
@@ -22,9 +23,10 @@
     else if (value.ttl && (!/^\d+$/.test(value.ttl) || Number(value.ttl) < 1 || Number(value.ttl) > 2147483647)) error = 'The reported DNS TTL is outside the supported range.';
     return {...value,error};
   }
+  const eligibleTags = config => config.tags.filter(tag => !config.excludedTags.includes(tag) && (config.mode !== 'weightedRoundRobin' || Number(config.weights[tag]) > 0));
   // A deterministic illustration of weighted ordering, not a DNS/traffic forecast.
   function nextWeighted(config, scores = []) {
-    const weights = config.tags.map(tag => Number(config.weights[tag]) || 0), total = weights.reduce((sum,n) => sum+n,0);
+    const weights = config.tags.map(tag => config.excludedTags.includes(tag) ? 0 : Number(config.weights[tag]) || 0), total = weights.reduce((sum,n) => sum+n,0);
     const next = weights.map((weight,i) => (scores[i] || 0)+weight);
     let first = -1;
     next.forEach((score,i) => { if (weights[i] > 0 && (first < 0 || score > next[first])) first = i; });
@@ -34,9 +36,12 @@
   function frame(config, step, weightedFirst) {
     const c = config, rotate = tags => tags.map((_,i) => tags[(i+step)%tags.length]);
     if (c.error) return {phase:'invalid',title:'Model unavailable',copy:c.error,selected:[],answer:[],moving:false,duration:2200};
+    const eligible = eligibleTags(c);
+    if (!eligible.length) return {phase:'empty',title:'No eligible sites',copy:c.excludedTags.length === c.tags.length ? 'All sites are manually excluded. No new site records are modeled; existing DNS caches may still contain old records.' : 'The remaining sites have no positive weight. No site records are modeled.',selected:[],answer:[],moving:false,duration:3200};
     if (c.mode === 'failover') {
-      const primary = c.primary, reserve = c.tags.find(tag => tag !== primary);
-      if (!reserve) return {phase:'single',title:`Primary ${primary}`,copy:'Only one GeoTag is reported. No failover destination is available in the model.',selected:[primary],answer:[primary],moving:true,duration:3200};
+      const primary = c.primary, reserve = eligible.find(tag => tag !== primary);
+      if (c.excludedTags.includes(primary)) return {phase:'primary-excluded',title:`Primary ${primary} is excluded`,copy:`The model uses ${reserve}. The primary remains excluded until it is explicitly included again; no simulated failback to it occurs.`,selected:[reserve],answer:[reserve],moving:true,duration:3200};
+      if (!reserve) return {phase:'single',title:`Primary ${primary}`,copy:'Only one eligible GeoTag remains. No included failover destination is available in the model.',selected:[primary],answer:[primary],moving:true,duration:3200};
       const phases = [
         {phase:'healthy',title:`Primary ${primary} is healthy`,copy:`DNS returns only ${primary}. ${reserve} is on standby.`,selected:[primary],answer:[primary],duration:3200},
         {phase:'failure',title:`Simulated failure of ${primary}`,copy:`After detection, DNS returns ${reserve}; the resolver still caches ${primary}.`,selected:[reserve],answer:[primary],down:primary,cache:true,duration:3000},
@@ -49,21 +54,20 @@
       return {...phases[phase],index:phase,moving:!phases[phase].cache};
     }
     if (c.mode === 'geoip') {
-      const subnet = Math.floor(step/2)%(c.tags.length+1), fallback = subnet === c.tags.length;
-      const selected = fallback ? rotate(c.tags) : [c.tags[subnet]];
+      const subnet = Math.floor(step/2)%(eligible.length+1), fallback = subnet === eligible.length;
+      const selected = fallback ? rotate(eligible) : [eligible[subnet]];
       return {phase:fallback ? 'fallback' : 'subnet',title:fallback ? 'Subnet outside the GeoIP database' : `Example subnet to ${selected[0]}`,
-        copy:fallback ? 'Fallback returns records for all modeled sites.' : 'Illustrative subnet-to-GeoTag mapping, not the cluster GeoIP database.',
+        copy:fallback ? 'Fallback returns records for all eligible modeled sites.' : 'Illustrative subnet-to-GeoTag mapping, not the cluster GeoIP database.',
         client:fallback ? 'Unmatched subnet' : `Example subnet ${subnet+1}`,selected,answer:selected,moving:true,duration:2400};
     }
-    const eligible = c.tags.filter(tag => c.mode !== 'weightedRoundRobin' || Number(c.weights[tag]) > 0);
-    const first = c.mode === 'weightedRoundRobin' ? weightedFirst || nextWeighted(c).first : eligible[step%eligible.length];
+    const first = c.mode === 'weightedRoundRobin' ? eligible.includes(weightedFirst) ? weightedFirst : nextWeighted(c).first : eligible[step%eligible.length];
     const selected = [first,...eligible.filter(tag => tag !== first)];
-    return {phase:'answer',title:`First site in the answer: ${first}`,copy:c.mode === 'weightedRoundRobin' ? 'Record ordering follows the reported policy weights.' : 'Each answer contains all modeled sites in rotating order.',
+    return {phase:'answer',title:`First site in the answer: ${first}`,copy:c.mode === 'weightedRoundRobin' ? 'Record ordering follows the policy weights of eligible sites only.' : 'Each answer contains all eligible modeled sites in rotating order.',
       selected,answer:selected,moving:true,duration:2200};
   }
   function html(id = 'k8gbPolicyDNS') {
     return `<aside class="k8gb-dns" id="${escape(id)}" aria-label="Illustrative DNS policy model"><div class="k8gb-dns-heading"><div><div class="k8gb-dns-eyebrow">DNS policy model <span class="k8gb-local">Simulation</span></div><h3 data-dns-hostname></h3></div><button type="button" class="k8gb-button k8gb-icon-button" data-dns-pause aria-label="Pause animation" title="Pause animation">${icon('pause')}</button></div>
-      <div class="k8gb-dns-meta"><span data-dns-playback></span><span data-dns-mode></span><span data-dns-ttl></span><span>Accelerated time</span></div><div class="k8gb-dns-source" data-dns-source></div>
+      <div class="k8gb-dns-meta"><span data-dns-playback></span><span data-dns-mode></span><span data-dns-ttl></span><span>Accelerated time</span></div><div class="k8gb-dns-source" data-dns-source></div><div class="k8gb-dns-exclusions" data-dns-exclusions hidden></div>
       <div class="k8gb-dns-phase"><div><strong data-dns-title></strong><span data-dns-step></span></div><p data-dns-copy></p></div><div data-dns-stage></div>
       <div class="k8gb-dns-answer"><div class="k8gb-dns-answer-heading"><span data-dns-answer-source></span><span data-dns-answer-kind></span></div><div class="k8gb-dns-answer-tags" data-dns-answer></div></div>
       <div class="k8gb-dns-stats" data-dns-stats></div><p class="k8gb-dns-caption" data-dns-caption></p></aside>`;
@@ -110,14 +114,16 @@
       $('[data-dns-strategy]').textContent = modes[config.mode] || 'Unknown strategy';
       config.tags.forEach((tag,i) => {
         const path = $(`[data-dns-path="${i}"]`), node = $(`[data-dns-node="${i}"]`), health = $(`[data-dns-health="${i}"]`);
-        path.classList.toggle('active',s.selected.includes(tag)); path.style.opacity = s.selected.includes(tag) ? s.selected[0] === tag ? '1' : '.4' : '.2';
-        node.classList.toggle('down',s.down === tag); health.classList.toggle('k8gb-dns-warning',s.down === tag);
-        health.textContent = s.down === tag ? 'Model: down' : config.mode === 'failover' ? tag === config.primary ? 'Primary' : s.selected.includes(tag) ? 'Active' : 'Standby' : s.selected.includes(tag) ? 'In answer' : Number(config.weights[tag]) === 0 && config.mode === 'weightedRoundRobin' ? 'Weight 0' : 'Eligible';
+        const excluded = config.excludedTags.includes(tag), selected = !excluded && s.selected.includes(tag);
+        path.classList.toggle('active',selected); path.classList.toggle('excluded',excluded); path.style.opacity = selected ? s.selected[0] === tag ? '1' : '.4' : excluded ? '.35' : '.2';
+        node.classList.toggle('excluded',excluded); node.dataset.excluded = String(excluded);
+        node.classList.toggle('down',!excluded && s.down === tag); health.classList.toggle('k8gb-dns-warning',!excluded && s.down === tag);
+        health.textContent = excluded ? config.mode === 'failover' && tag === config.primary ? 'Primary / Excluded' : 'Excluded' : s.down === tag ? 'Model: down' : config.mode === 'failover' ? tag === config.primary ? 'Primary' : selected ? 'Active' : 'Standby' : selected ? 'In answer' : Number(config.weights[tag]) === 0 && config.mode === 'weightedRoundRobin' ? 'Weight 0' : 'Eligible';
       });
       $('[data-dns-answer-source]').textContent = s.cache ? 'Resolver cache' : 'Modeled answer / GeoTag';
       $('[data-dns-answer-kind]').textContent = s.cache ? 'Previous record' : s.answer.length > 1 ? 'Record ordering' : s.answer.length ? 'One site' : 'No modeled answer';
-      $('[data-dns-answer]').innerHTML = s.answer.map((tag,i) => `<span class="k8gb-dns-answer-tag k8gb-dns-series-${config.tags.indexOf(tag)%2}"><span>${i+1}</span>${escape(tag)}</span>`).join('') || '<span class="k8gb-muted">Policy data unavailable</span>';
-      if (config.mode === 'failover') $('[data-dns-stats]').innerHTML = `<span class="k8gb-muted">Modeled DNS</span> <strong>${escape(s.selected.join(', ') || 'Not reported')}</strong>${s.cache ? `<small>Resolver cache: ${escape(cached)}</small>` : `<small>Primary ${escape(config.primary)}</small>`}`;
+      $('[data-dns-answer]').innerHTML = s.answer.map((tag,i) => `<span class="k8gb-dns-answer-tag k8gb-dns-series-${config.tags.indexOf(tag)%2}"><span>${i+1}</span>${escape(tag)}</span>`).join('') || `<span class="k8gb-muted">${config.error ? 'Policy data unavailable' : 'No eligible site records'}</span>`;
+      if (config.mode === 'failover') $('[data-dns-stats]').innerHTML = `<span class="k8gb-muted">Modeled DNS</span> <strong>${escape(s.selected.join(', ') || (config.error ? 'Not reported' : 'None'))}</strong>${s.cache ? `<small>Resolver cache: ${escape(cached)}</small>` : `<small>Primary ${escape(config.primary)}${config.excludedTags.includes(config.primary) ? ' / Excluded' : ''}</small>`}`;
       if (config.mode === 'geoip') $('[data-dns-stats]').textContent = 'Scenario: illustrative site subnets and fallback.';
     }
     function paint() {
@@ -137,11 +143,12 @@
     }
     function playback() {
       if (!host) return;
-      const button = $('[data-dns-pause]'), label = reduced.matches ? 'Animation disabled by reduced-motion preference' : paused ? 'Resume animation' : 'Pause animation';
-      button.disabled = Boolean(config.error) || reduced.matches; button.setAttribute('aria-label',label); button.title = label;
+      const empty = !eligibleTags(config).length;
+      const button = $('[data-dns-pause]'), label = config.error ? 'Model unavailable' : empty ? 'No eligible sites' : reduced.matches ? 'Animation disabled by reduced-motion preference' : paused ? 'Resume animation' : 'Pause animation';
+      button.disabled = Boolean(config.error) || empty || reduced.matches; button.setAttribute('aria-label',label); button.title = label;
       button.setAttribute('aria-pressed',String(paused || reduced.matches)); button.innerHTML = icon(paused || reduced.matches ? 'play' : 'pause');
-      $('[data-dns-playback]').textContent = config.error ? 'Unavailable' : paused || reduced.matches ? 'Paused' : 'Autoplay';
-      $('[data-dns-playback]').classList.toggle('paused',paused || Boolean(config.error));
+      $('[data-dns-playback]').textContent = config.error ? 'Unavailable' : empty ? 'No eligible sites' : paused || reduced.matches ? 'Paused' : 'Autoplay';
+      $('[data-dns-playback]').classList.toggle('paused',paused || empty || Boolean(config.error));
     }
     function tick(timestamp) {
       if (!running || !host?.isConnected) { stop(); return; }
@@ -155,7 +162,7 @@
     }
     function syncPlayback() {
       if (!host) return;
-      const shouldRun = !paused && !reduced.matches && !config.error && visible && !document.hidden;
+      const shouldRun = !paused && !reduced.matches && !config.error && eligibleTags(config).length > 0 && visible && !document.hidden;
       if (shouldRun && !running) { running = true; last = 0; raf = requestAnimationFrame(tick); }
       if (!shouldRun) stop();
       playback(); paint();
@@ -177,14 +184,17 @@
         intersection = new IntersectionObserver(entries => { if (entries[0].target === host) { visible = entries[0].isIntersecting; syncPlayback(); } }); intersection.observe(host);
       }
       if (changed || rebound) {
-        host.dataset.dnsContext = config.context; host.dataset.dnsCod = config.cod;
+        host.dataset.dnsContext = config.context; host.dataset.dnsCod = config.cod; host.dataset.dnsExcluded = JSON.stringify(config.excludedTags);
         $('[data-dns-hostname]').innerHTML = config.hostname ? config.hostname.split('.').map(escape).join('.<wbr>') : 'Hostname not reported';
         $('[data-dns-mode]').textContent = modes[config.mode] || String(config.mode || 'Unknown strategy');
         $('[data-dns-ttl]').textContent = config.ttl ? `TTL ${config.ttl} s` : 'TTL not reported';
         $('[data-dns-source]').textContent = `${config.draft ? 'Unsaved form' : 'Reported policy'} / ${config.cod || 'cluster not reported'}`;
-        const total = config.tags.reduce((sum,tag) => sum+(Number(config.weights[tag]) || 0),0);
-        $('[data-dns-stats]').innerHTML = config.mode === 'weightedRoundRobin' && !config.error ? `<span class="k8gb-muted">Modeled first-record share</span><div class="k8gb-dns-allocation" role="img" aria-label="Reported site weights">${config.tags.filter(tag => Number(config.weights[tag]) > 0).map(tag => `<span class="k8gb-dns-series-${config.tags.indexOf(tag)%2}" style="flex:${Number(config.weights[tag])/total}"></span>`).join('')}</div><div class="k8gb-dns-shares">${config.tags.map(tag => `<span>${escape(tag)} / ${escape(config.weights[tag])} / ${(100*Number(config.weights[tag])/total).toLocaleString('en-GB',{maximumFractionDigits:1})}%</span>`).join('')}</div>` : config.mode === 'roundRobin' ? `${config.tags.length} sites / all modeled records` : '';
+        $('[data-dns-exclusions]').hidden = !config.excludedTags.length;
+        $('[data-dns-exclusions]').textContent = `Excluded from modeled answers: ${config.excludedTags.join(', ')}`;
+        const eligible = eligibleTags(config), total = eligible.reduce((sum,tag) => sum+(Number(config.weights[tag]) || 0),0);
+        $('[data-dns-stats]').innerHTML = config.mode === 'weightedRoundRobin' && !config.error ? `<span class="k8gb-muted">Modeled first-record share</span><div class="k8gb-dns-allocation" role="img" aria-label="Effective site weights excluding manual exclusions">${eligible.map(tag => `<span class="k8gb-dns-series-${config.tags.indexOf(tag)%2}" style="flex:${Number(config.weights[tag])/total}"></span>`).join('')}</div><div class="k8gb-dns-shares">${config.tags.map(tag => `<span>${escape(tag)} / ${escape(config.weights[tag])} / ${config.excludedTags.includes(tag) ? 'Excluded' : `${(total ? 100*Number(config.weights[tag])/total : 0).toLocaleString('en-GB',{maximumFractionDigits:1})}%`}</span>`).join('')}</div>` : config.mode === 'roundRobin' ? `${eligible.length} eligible / ${config.tags.length} sites` : '';
         $('[data-dns-caption]').textContent = config.mode === 'failover' ? 'Illustrative failure and recovery, not observed availability. Actual failover depends on health checks, DNS updates and resolver cache; standby selection is illustrative.' : config.mode === 'geoip' ? 'GeoIP relies on EDNS Client Subnet and a GeoIP database. Subnet mappings here are illustrative, not cluster data.' : config.mode === 'weightedRoundRobin' ? 'Illustrative ordering, not an HTTP traffic forecast. Zero-weight sites are excluded from the model.' : 'DNS model, not HTTP traffic. Availability and record ordering are illustrative, not live observations.';
+        if (config.excludedTags.length) $('[data-dns-caption]').textContent += ' Manual exclusions are omitted from new modeled answers; actual DNS withdrawal and cache expiry are not confirmed.';
         draw();
       }
       syncPlayback();
