@@ -1,5 +1,14 @@
 # Install the published Helm chart
 
+**First installation?** Start with the
+[complete README walkthrough](../README.md#install-in-kubernetes). It includes
+credential generation, TLS/auth/connection Secret commands, every values file,
+both Helm installs and login verification for one Console and two read-only
+agents. No existing tokens or values files are assumed. This guide expands that
+path to distributed Consoles, private CAs, administrator writes and the optional
+Traefik webhook. Do not rerun credential generation after following the README;
+reuse the same private files and existing Secrets when enabling another feature.
+
 Deploy an agent in every participating cluster and Console in one or several
 sites. Each Console queries all configured agents; it does not store desired
 GSLB state. Kubernetes resources remain the source of truth. The optional webhook
@@ -162,6 +171,19 @@ delete an existing namespace to retry installation.
 
 ## 2. Prepare agent credentials and TLS
 
+The chart mounts **existing** Secrets; it does not create or generate their
+contents. All files under `$PRIVATE` in this section are on your workstation.
+Paths such as `/run/sites/west/token` later in Console values are **inside the
+pod**, created by mounting a Secret, not workstation files to create manually.
+
+| Secret | Where to create it | Contents and purpose |
+| --- | --- | --- |
+| `agent-auth` | Each agent cluster | That site's `token`, `write-token`, `plan-key`; distinct credentials per site |
+| `agent-tls` | Each agent cluster | `tls.crt` / `tls.key` for its dedicated agent HTTPS endpoint |
+| `ui-auth` | Every Console cluster (step 4) | Shared `users.yaml` / `session-key` for built-in login |
+| `east-connection`, `west-connection` | **Both** on every Console cluster (step 4) | Copies of the matching site's read/write tokens and optional public `ca.crt`; never its `plan-key` |
+| `ui-tls` | Every Console cluster (step 4) | `tls.crt` / `tls.key` for the public Console hostname |
+
 Generate distinct read, write and plan-signing credentials for each site. The
 first installation remains read-only; the extra credentials allow a deliberate
 writer upgrade later. Do not regenerate these files on routine upgrades.
@@ -323,6 +345,14 @@ done
 The same users, session key, bindings and registry are needed on all Consoles
 serving the same public hostname. Copy both sites' connection credentials to each
 Console site. Do not put passwords, tokens or private keys in Helm values.
+
+The read token is deliberately present in two places: `$PRIVATE/west/token`
+supplies west's `agent-auth` and every Console site's `west-connection`. The
+agent validates it from `/run/auth/token`; Console reads the matching value from
+`/run/sites/west/token` and sends `Authorization: Bearer ...` over HTTPS. These
+are service credentials, unrelated to Kubernetes ServiceAccount tokens or user
+login/session tokens. The Secret key `token` becomes the filename `token` under
+the configured mount path. A file path in values never creates a token by itself.
 
 Create `$PRIVATE/console.yaml`:
 

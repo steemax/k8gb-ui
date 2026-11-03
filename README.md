@@ -72,29 +72,246 @@ telemetry.
 
 ## Install in Kubernetes
 
-The published Helm repository is **<https://steemax.github.io/k8gb-ui/>**.
-No local image build is required. k8gb and its CRDs must already be installed in
-each participating cluster; Traefik is optional for native Gslb management.
+This is a **complete first-install walkthrough**: one Console in east, an agent
+in east and west, built-in login, and **read-only access**. It uses published
+images and the chart at **<https://steemax.github.io/k8gb-ui/>**; no image build
+or Keycloak is required. The Traefik webhook is disabled.
+
+```text
+Browser -> Console in east -> east-agent -> east Kubernetes API
+                          -> west-agent -> west Kubernetes API
+```
+
+Run the steps in order. Helm does **not** generate passwords, tokens or TLS
+certificates: you create their Secrets below before installing the chart.
+For an existing installation, preserve credentials and use the
+[upgrade instructions](docs/installation.md#7-verify-and-upgrade-safely), not the
+first-install generation commands.
+
+### 1. Choose endpoints and prepare the workspace
+
+You need working k8gb/CRDs in both clusters, the existing application namespace
+`catalog`, and an ingress controller or TLS proxy. On your workstation install
+`kubectl`, Helm, OpenSSL, Git and Go 1.26.10+; Go is used only to generate built-in
+password hashes, not to build images or run anything in the clusters.
+
+Replace the following example names **everywhere in the commands and YAML**:
+
+| Example | Your value |
+| --- | --- |
+| `east`, `west` | Unique cluster IDs; this example also uses these as k8gb GeoTags |
+| `catalog` | An existing application namespace to view |
+| `apps.example.test` | A zone already served by your k8gb installation |
+| `east-agent.example.test` | Dedicated HTTPS endpoint reaching only the east agent |
+| `west-agent.example.test` | Dedicated HTTPS endpoint reaching only the west agent |
+| `gslb.apps.example.test` | HTTPS Console endpoint, pointing to east for this walkthrough |
+| `your-ingress-class` | Your existing IngressClass |
+
+Provision the three endpoint DNS names and matching server certificates through
+your existing PKI/certificate manager. This chart does not configure DNS
+delegation, install an ingress controller or issue certificates. Every Console
+must reach every agent; the two agent URLs must not be a shared round-robin
+address. Restrict agent ingress/backend access to trusted Console traffic.
+
+Choose contexts from `kubectl config get-contexts`. `PRIVATE` is a **workstation
+directory outside Git**, not a path inside a pod:
 
 ```sh
+export EAST_CONTEXT=your-east-context
+export WEST_CONTEXT=your-west-context
+export PRIVATE="$HOME/.config/k8gb-ui-install"
+# Keep Console only in east when following the later upgrade guide.
+export CONSOLE_IN_WEST=false
+umask 077
+mkdir -p "$PRIVATE/east" "$PRIVATE/west"
+chmod 700 "$PRIVATE"
+
+kubectl --context "$EAST_CONTEXT" get namespace catalog k8gb
+kubectl --context "$WEST_CONTEXT" get namespace catalog k8gb
+kubectl --context "$EAST_CONTEXT" create namespace k8gb-ui
+kubectl --context "$WEST_CONTEXT" create namespace k8gb-ui
+
 helm repo add k8gb-ui https://steemax.github.io/k8gb-ui/
 helm repo update k8gb-ui
 helm search repo k8gb-ui/k8gb-ui --versions
 ```
 
-Install an agent in **each** cluster. Console can run in one or all sites and
-connects to every agent over verified HTTPS. Start read-only, then explicitly
-enable administrator writes and, if needed, the IngressRoute webhook.
+Skip a `create namespace` command if that namespace already exists. If your k8gb
+Deployment is not `k8gb/k8gb`, adjust `agent.controller` in step 5.
 
-### How Console knows your clusters
+### 2. Generate credentials once
 
-**There is no automatic cluster discovery.** You declare the complete intended
-inventory in Helm `console.clusters` on **every Console**, regardless of which
-cluster hosts that Console. For example, this registry fragment describes two
-sites; it is not a complete installation values file:
+These credentials have different purposes:
+
+| File | Used for | Shared with |
+| --- | --- | --- |
+| `east/token`, `west/token` | Console authenticates read requests to that agent | The matching agent and every Console, never another site's agent |
+| `east/write-token`, `west/write-token` | Separate administrator mutation credential | The matching agent and writable Consoles |
+| `east/plan-key`, `west/plan-key` | Agent signs short-lived mutation plans | Only replicas of that same agent; never Console |
+| `session-key` | Console signs login/session cookies | All Console replicas/sites serving the same UI |
+| `users.yaml` | Built-in users with password hashes | All Console replicas/sites using those accounts |
+
+Generate distinct agent credentials, plus a Console session key. Write/plan keys
+are prepared for an optional later upgrade; **their presence does not enable
+writes**. Do not rerun this block on upgrades or overwrite existing key files:
+
+```sh
+for site in east west; do
+  openssl rand -hex 32 > "$PRIVATE/$site/token"
+  openssl rand -hex 32 > "$PRIVATE/$site/write-token"
+  openssl rand -hex 32 > "$PRIVATE/$site/plan-key"
+done
+openssl rand 32 > "$PRIVATE/session-key"
+```
+
+Generate two password hashes using the project helper. It prompts without echo
+and asks for confirmation; use passwords of at least 12 bytes. No password is
+passed on the command line:
+
+```sh
+git clone https://github.com/steemax/k8gb-ui.git "$PRIVATE/source"
+go -C "$PRIVATE/source" run ./cmd/password-hash > "$PRIVATE/operator.hash"
+go -C "$PRIVATE/source" run ./cmd/password-hash > "$PRIVATE/catalog-reader.hash"
+```
+
+Create `$PRIVATE/users.yaml`, replacing each placeholder with the **full single
+line** from the matching `.hash` file, preserving the YAML quotes:
+
+```yaml
+users:
+  - username: operator
+    passwordHash: 'REPLACE_WITH_OPERATOR_ARGON2ID_HASH'
+    groups: [platform-admins]
+  - username: catalog-reader
+    passwordHash: 'REPLACE_WITH_READER_ARGON2ID_HASH'
+    groups: [team-catalog]
+```
+
+There is no default password. Agent bearer tokens are service credentials, not
+Kubernetes ServiceAccount tokens or user login tokens.
+
+### 3. Create TLS Secrets
+
+Obtain the certificate/key files from your PKI. Replace the absolute paths below
+with those existing files. Certificates must cover the corresponding endpoint
+hostnames from step 1; use the full server certificate chain:
+
+```sh
+kubectl --context "$EAST_CONTEXT" -n k8gb-ui create secret tls agent-tls \
+  --cert=/absolute/path/east-agent-fullchain.crt --key=/absolute/path/east-agent.key
+kubectl --context "$WEST_CONTEXT" -n k8gb-ui create secret tls agent-tls \
+  --cert=/absolute/path/west-agent-fullchain.crt --key=/absolute/path/west-agent.key
+kubectl --context "$EAST_CONTEXT" -n k8gb-ui create secret tls ui-tls \
+  --cert=/absolute/path/console-fullchain.crt --key=/absolute/path/console.key
+```
+
+This walkthrough uses agent certificates trusted by the Console image's system
+CA store. **For a private agent CA**, place the public bundles in
+`$PRIVATE/east/ca.crt` and `$PRIVATE/west/ca.crt`. In step 4 add
+`--from-file=ca.crt="$PRIVATE/east/ca.crt"` to the `east-connection` command and
+`--from-file=ca.crt="$PRIVATE/west/ca.crt"` to `west-connection`.
+In step 5 uncomment the corresponding `caFile` lines. Do not distribute CA
+private keys or disable TLS verification. Your browser must also trust the UI
+certificate issuer.
+
+### 4. Create authentication and connection Secrets
+
+Run these commands **once**, using the files generated in step 2:
+
+```sh
+kubectl --context "$EAST_CONTEXT" -n k8gb-ui create secret generic agent-auth \
+  --from-file=token="$PRIVATE/east/token" \
+  --from-file=write-token="$PRIVATE/east/write-token" \
+  --from-file=plan-key="$PRIVATE/east/plan-key"
+kubectl --context "$WEST_CONTEXT" -n k8gb-ui create secret generic agent-auth \
+  --from-file=token="$PRIVATE/west/token" \
+  --from-file=write-token="$PRIVATE/west/write-token" \
+  --from-file=plan-key="$PRIVATE/west/plan-key"
+
+kubectl --context "$EAST_CONTEXT" -n k8gb-ui create secret generic ui-auth \
+  --from-file=users.yaml="$PRIVATE/users.yaml" \
+  --from-file=session-key="$PRIVATE/session-key"
+kubectl --context "$EAST_CONTEXT" -n k8gb-ui create secret generic east-connection \
+  --from-file=token="$PRIVATE/east/token" \
+  --from-file=write-token="$PRIVATE/east/write-token"
+kubectl --context "$EAST_CONTEXT" -n k8gb-ui create secret generic west-connection \
+  --from-file=token="$PRIVATE/west/token" \
+  --from-file=write-token="$PRIVATE/west/write-token"
+```
+
+Where these Secrets live and how Helm uses them:
+
+| Secret | Cluster | Values / pod files |
+| --- | --- | --- |
+| `agent-auth` | Each cluster, with **different contents** | `agent.authSecretName`; agent reads `/run/auth/token` and optional write/plan files |
+| `ui-auth` | East (the Console site) | `console.authSecretName`; `/run/auth/users.yaml` and `/run/auth/session-key` |
+| `east-connection` | East | Console mount `/run/sites/east`; keys become `token`, `write-token` and optional `ca.crt` files |
+| `west-connection` | East, **not only west** | Console mount `/run/sites/west`; same west read/write token values as west's `agent-auth` |
+| `agent-tls` | Each cluster | Local agent Ingress server certificate/key |
+| `ui-tls` | East | Console Ingress server certificate/key |
+
+For example, the one workstation file `$PRIVATE/west/token` supplies **both**
+west's `agent-auth/token` and east's `west-connection/token`. Kubernetes mounts
+the latter inside Console as `/run/sites/west/token`. That is the path used by
+`bearerTokenFile` below; you do not create that pod path by hand. The plan key
+stays with the agent. No credential values belong in Helm values or Git.
+
+### 5. Write the values files
+
+Create `$PRIVATE/agent.yaml` (shared settings; no site identity here):
+
+```yaml
+fullnameOverride: k8gb-ui
+console:
+  enabled: false
+agent:
+  enabled: true
+  writesEnabled: false
+  namespaces: [catalog]
+  geoTags: [east, west]
+  authSecretName: agent-auth
+  controller:
+    namespace: k8gb
+    deployment: k8gb
+  ingress:
+    enabled: true
+    className: your-ingress-class
+    tlsSecretName: agent-tls
+```
+
+Create `$PRIVATE/east.yaml` (east only):
+
+```yaml
+agent:
+  clusterID: east
+  ingress:
+    host: east-agent.example.test
+```
+
+Create `$PRIVATE/west.yaml` (west only):
+
+```yaml
+agent:
+  clusterID: west
+  ingress:
+    host: west-agent.example.test
+```
+
+Create `$PRIVATE/console.yaml` (full registry and Console settings):
 
 ```yaml
 console:
+  enabled: true
+  writesEnabled: false
+  authSecretName: ui-auth
+  auth:
+    mode: builtin
+    publicURL: https://gslb.apps.example.test
+    usersFile: /run/auth/users.yaml
+    cookieKeyFile: /run/auth/session-key
+    bindings:
+      - {role: admin, groups: [platform-admins], clusters: ['*'], namespaces: ['*']}
+      - {role: viewer, groups: [team-catalog], clusters: [east, west], namespaces: [catalog]}
   clusters:
     - id: east
       name: East
@@ -103,6 +320,7 @@ console:
       zones: [apps.example.test]
       namespaces: [catalog]
       bearerTokenFile: /run/sites/east/token
+      # caFile: /run/sites/east/ca.crt
     - id: west
       name: West
       url: https://west-agent.example.test
@@ -110,60 +328,93 @@ console:
       zones: [apps.example.test]
       namespaces: [catalog]
       bearerTokenFile: /run/sites/west/token
+      # caFile: /run/sites/west/ca.crt
+  secretMounts:
+    - {name: east, secretName: east-connection, mountPath: /run/sites/east}
+    - {name: west, secretName: west-connection, mountPath: /run/sites/west}
+  ingress:
+    enabled: true
+    className: your-ingress-class
+    host: gslb.apps.example.test
+    tlsSecretName: ui-tls
 ```
 
-- `id` must equal that site's `agent.clusterID`; `name` is its display label.
-  IDs are operator-chosen, unique DNS labels, not kube-context names. Console
-  rejects an agent response carrying a different cluster ID.
-- `url` is that site's dedicated agent endpoint, **not** the shared GSLB UI URL.
-  Each agent reads only its own Kubernetes API; agents do not discover or poll
-  one another. The browser calls Console, which queries the authorized agents.
-- `geoTags` are the actual k8gb tags reported by this site, which may differ from
-  its ID. `agent.geoTags` has a different purpose: the allowed policy tags across
-  the site's DNS group, for example `[east, west]` on both agents.
-- `zones` declares where each site is expected to participate. For a hostname
-  in `apps.example.test`, both entries above are expected, within the user's
-  cluster/namespace scope. An unreachable agent or incomplete inventory is shown
-  as unknown; a missing Gslb is reported only after a complete inventory.
+`console.clusters` is how Console knows **which agents to poll**. `id` must match
+the remote `agent.clusterID`; `name` is the display label; `url` is that one
+agent's endpoint. There is no auto-registration. Each agent reads its own
+Kubernetes API, not peer clusters. Actual local k8gb `geoTags` can differ from
+cluster IDs; `agent.geoTags` instead lists allowed policy tags across the group.
 
-**A cluster omitted from this registry is invisible, not detected as missing.**
-The registry is your declared inventory, not proof that no other clusters exist.
-Discovering served DNS zones from k8gb `DNS_ZONES` does not discover peer clusters
-or their agent URLs. See [registry fields and completeness limits](docs/installation.md#cluster-registry-and-completeness).
+All sites declaring a hostname's `zones` are expected participants within the
+user's scope. An unreachable/partial source is unknown, not confirmed absent.
+**A cluster omitted from the registry is invisible.** Reading k8gb `DNS_ZONES`
+discovers domains, not agents or their addresses. See
+[completeness limits](docs/installation.md#cluster-registry-and-completeness).
 
-### Shared values and per-site overrides
+### 6. Install Console and agents
 
-Use common `agent.yaml` / `console.yaml` settings plus a site-specific values file:
-`east.yaml` sets `agent.clusterID: east` and its agent hostname; `west.yaml` sets
-the corresponding west values. Agents need distinct credentials even if their
-Secret names match. All distributed Consoles need the **same full registry**,
-access bindings and session key, not just their local cluster entry.
-See the [values comparison and overlay order](docs/installation.md#which-values-are-shared).
-
-Follow the [installation guide for topology A or B](docs/installation.md) to prepare
-Secrets, HTTPS endpoints and the private values files used below. It covers
-built-in users without Keycloak, OIDC, shared audit and the optional webhook.
-There is no usable default password, and a bare `helm install` intentionally
-refuses an unconfigured deployment.
-
-After preparing those files, an agent installation uses the **published chart**:
+Apply the shared settings first, then the site-specific override. East includes
+`console.yaml`, so it runs Console + agent; west omits it, so it runs only agent:
 
 ```sh
 helm --kube-context "$EAST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
-  --version 0.1.2 --namespace k8gb-ui --create-namespace \
-  -f "$PRIVATE/agent.yaml" -f "$PRIVATE/east.yaml" \
+  --version 0.1.2 -n k8gb-ui \
+  -f "$PRIVATE/agent.yaml" -f "$PRIVATE/console.yaml" -f "$PRIVATE/east.yaml" \
   --wait --timeout 5m
 helm --kube-context "$WEST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
-  --version 0.1.2 --namespace k8gb-ui --create-namespace \
+  --version 0.1.2 -n k8gb-ui \
   -f "$PRIVATE/agent.yaml" -f "$PRIVATE/west.yaml" \
   --wait --timeout 5m
 ```
 
-These commands install agents only. Then choose single-site or distributed
-Console placement independently of enabling the webhook. The guide includes
-both agent commands and the corresponding
-Console/write/webhook upgrade steps.
-Replace all `.example.test` names with your own DNS names.
+The chart creates Deployments, Services, Ingresses, non-secret Console
+configuration and RBAC. It mounts the existing Secrets; it does not generate
+them or copy them across clusters. The default agent RBAC allows cluster-wide
+reads, **not writes or Secret reads**; `agent.namespaces` restricts its API.
+For Kubernetes-level namespace isolation, supply your own RBAC as described in
+the [chart reference](charts/k8gb-ui/README.md#topology-and-profiles).
+
+### 7. Verify and log in
+
+```sh
+kubectl --context "$EAST_CONTEXT" -n k8gb-ui rollout status deployment/k8gb-ui-agent
+kubectl --context "$WEST_CONTEXT" -n k8gb-ui rollout status deployment/k8gb-ui-agent
+kubectl --context "$EAST_CONTEXT" -n k8gb-ui rollout status deployment/k8gb-ui-console
+kubectl --context "$EAST_CONTEXT" -n k8gb-ui get ingress
+kubectl --context "$WEST_CONTEXT" -n k8gb-ui get ingress
+```
+
+Open **your replacement for `https://gslb.apps.example.test`**. Log in as
+`operator` or `catalog-reader` with the password entered for that account in
+step 2, not the hash or bearer token. Select `catalog` and confirm both agents
+are available. No existing Gslbs means an empty resource list, not a failed login.
+Even `operator` cannot change resources until writes are explicitly enabled.
+Use the HTTPS hostname: a plain HTTP port-forward does not support Secure login
+cookies. Pod readiness alone does not prove Console can reach both agents.
+
+| Symptom | Check |
+| --- | --- |
+| Pod cannot mount a Secret | Correct Secret name and keys in the same namespace/cluster as the pod |
+| Agent unavailable / HTTP 401 | Connection Secret has the exact same read token as that site's `agent-auth` |
+| Agent unavailable / TLS error | Agent DNS, certificate hostname/full chain, and optional CA bundle + `caFile`; no TLS bypass |
+| Agent identity mismatch | Registry `id` matches `agent.clusterID`; endpoint cannot switch between sites |
+| Namespace missing | Local namespace exists and matches agent/Console allowlists and user bindings |
+| Login rejected | Real Argon2id hashes replaced both placeholders; use the matching username/password |
+
+### Next: writes, webhook or distributed Console
+
+This completes the first read-only installation. The next stages are independent:
+
+- [Administrator writes and shared audit](docs/installation.md#5-enable-administrator-writes-and-shared-audit): reuse the prepared write/plan keys, add `writeTokenFile` and enable writes explicitly.
+- [Optional Traefik webhook](docs/installation.md#6-optional-traefik-ingressroute-webhook): provision its own TLS Secret/CA and enable the adapter; native management needs no webhook.
+- [Console in multiple sites](docs/installation.md#4-add-authenticated-console): create `ui-auth`, **both** connection Secrets and `ui-tls` at every Console site; use the same full registry, bindings and session key. Helm does not synchronize these Secrets.
+- [OIDC instead of built-in login](docs/authentication.md#oidc-and-keycloak): use explicit group/subject bindings; Keycloak administrator roles grant no implicit UI access.
+
+On upgrades reuse the complete chosen values and per-site overrides; do not
+regenerate credentials or replace existing audit journals. Later `-f` files win;
+lists such as `console.clusters` are replaced, not merged by ID. See the
+[shared/per-site comparison](docs/installation.md#which-values-are-shared) and
+[adding another cluster](docs/installation.md#add-another-cluster-later).
 
 ## Deployment
 
