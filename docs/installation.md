@@ -28,6 +28,81 @@ not agent deployment. Both Consoles use one public origin,
 `https://gslb.apps.example.test`, in option B. Publishing that hostname through
 k8gb is a separate bootstrap step, not a side effect of installing the chart.
 
+## Cluster registry and completeness
+
+The topology is **configured, not auto-discovered**. Helm writes
+`console.clusters` into Console's configuration. Every Console uses that entire
+registry, even when running beside a local agent. There is no separate cluster
+count: two entries mean two configured sites, three entries mean three sites.
+RBAC and namespace allowlists can reduce which entries a given user may query.
+
+```text
+Browser -> any Console -> east-agent -> east Kubernetes API
+                      -> west-agent -> west Kubernetes API
+```
+
+Agents do not register themselves with Console, contact peer agents or read other
+clusters' kubeconfigs. In-cluster agents use the local ServiceAccount. Installing
+an agent in another cluster does not automatically add it to any Console.
+
+| Setting | Meaning |
+| --- | --- |
+| `console.clusters[].id` | Stable, unique DNS-label ID chosen by the operator; must match that site's `agent.clusterID` and cluster IDs in access bindings |
+| `console.clusters[].name` | Human-readable UI label; defaults to `id` when omitted |
+| `console.clusters[].url` | Dedicated HTTPS address for this site's agent, reachable from every Console; never a shared endpoint that can route to a different site's agent |
+| `console.clusters[].geoTags` | Actual k8gb GeoTag(s) reported by this site; e.g. east has `[east]`, west has `[west]`; these need not equal cluster IDs |
+| `console.clusters[].zones` | Explicit served zones in which this site is expected to participate; used to group hostnames and compare site presence |
+| `console.clusters[].namespaces` | Console-side namespace allowlist; additionally restricted by user bindings, the agent allowlist and Kubernetes RBAC |
+| `agent.geoTags` / `webhook.geoTags` | Allowed policy GeoTags for the managed group; normally `[east, west]` in both sites in this example, not just the local tag |
+| `agent.controller` | Local k8gb Deployment used to discover served DNS zones for creation; it does not supply the cluster registry |
+
+For example, an operator ID `dc-a` and UI name `Region A` can correspond to the
+k8gb GeoTag `east`: set `agent.clusterID: dc-a` and the matching Console entry to
+`id: dc-a`, `name: Region A`, `geoTags: [east]`. Bindings use `dc-a`; primary and
+weight policies use `east`. Helm kube-context names are workstation deployment
+targets only and are not used as runtime cluster IDs.
+
+**What "complete" means:** for the requested namespace and authorized sites,
+Console matches each observed hostname to a configured zone (the longest matching
+suffix). Sites declaring that zone are expected participants. An available agent
+with a complete inventory but no matching Gslb produces a missing-object signal;
+an unreachable agent or partial inventory produces an unknown-source signal,
+not a confirmed absence. If the hostname matches no declared zone, expected
+participation is unknown. This is a zone-level expectation, not a separate
+per-service membership list.
+
+An unregistered site cannot be detected as missing. Nor can Console prove that a
+user's authorized subset is the full infrastructure. Keep the complete intended
+registry on every Console and let bindings restrict users. Reading k8gb
+`DNS_ZONES` discovers domains, **not** site names, peer agent URLs or credentials;
+it does not populate or replace `console.clusters`.
+
+## Which values are shared
+
+The chart is the same in every cluster; the **effective values are not identical**.
+Use common files with a small site override, applied last:
+
+| Values / resources | East | West |
+| --- | --- | --- |
+| `agent.yaml` | Common agent settings | Same common settings, if namespaces/controller configuration match |
+| `east.yaml` / `west.yaml` | `agent.clusterID: east`, east agent hostname | `agent.clusterID: west`, west agent hostname |
+| `console.yaml` registry, bindings and auth settings | Full `[east, west]` registry | Same full registry when Console is enabled |
+| Console placement | Enabled | Disabled in A; enabled in B |
+| Agent auth Secret | East read/write tokens and plan key | Different west tokens and plan key; the Secret name may be the same |
+| Console connection Secrets | Credentials for **both** agents | Credentials for **both** agents in B |
+| Console users/session key | Shared across Console replicas/sites | Same values in B; not independently regenerated |
+| Agent/webhook TLS Secret and CA | Valid for east endpoints/services | Valid for west endpoints/services; adjust the CA overlay if the issuer differs |
+| Writes/Traefik overlays | Common when policy/configuration match | Common when policy/configuration match; otherwise supply explicit site overrides |
+
+The examples below use `$PRIVATE/agent.yaml`, optional `console.yaml`,
+`writes.yaml`, `traefik.yaml`, then `east.yaml` or `west.yaml`. Later `-f` files
+override earlier ones; `--set` overrides them all. YAML lists, including
+`console.clusters`, are **replaced, not merged by ID**: provide the full list in
+the shared Console file, not a different one-entry list on each site.
+
+These files are private installation inputs, not files automatically generated by
+the chart. Application state remains in Kubernetes, not in this configuration.
+
 ## 1. Prerequisites and topology
 
 - Kubernetes 1.26+ with working k8gb, its CRDs and DNS in each site. The current
@@ -134,7 +209,6 @@ console:
   enabled: false
 agent:
   enabled: true
-  clusterID: east
   namespaces: [catalog]
   geoTags: [east, west]
   authSecretName: agent-auth
@@ -144,9 +218,31 @@ agent:
   ingress:
     enabled: true
     className: your-ingress-class
-    host: east-agent.example.test
     tlsSecretName: agent-tls
 ```
+
+Create `$PRIVATE/east.yaml`:
+
+```yaml
+agent:
+  clusterID: east
+  ingress:
+    host: east-agent.example.test
+```
+
+Create `$PRIVATE/west.yaml`:
+
+```yaml
+agent:
+  clusterID: west
+  ingress:
+    host: west-agent.example.test
+```
+
+These overrides intentionally contain only local identity and endpoint settings.
+Add controller/namespace differences here if needed. For the two-site example,
+both agents allow policy tags `[east, west]`, while each Console registry entry
+below declares only that site's own reported GeoTag.
 
 Use actual k8gb GeoTags, which need not equal cluster IDs. The controller locator
 is used for DNS zone discovery. The agent reads literal `DNS_ZONES` from that
@@ -157,12 +253,10 @@ resolve Secret/ConfigMap-backed environment values. See
 ```sh
 helm --kube-context "$EAST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
   --version 0.1.2 -n k8gb-ui --create-namespace -f "$PRIVATE/agent.yaml" \
-  --set-string agent.clusterID=east \
-  --set-string agent.ingress.host=east-agent.example.test --wait --timeout 5m
+  -f "$PRIVATE/east.yaml" --wait --timeout 5m
 helm --kube-context "$WEST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
   --version 0.1.2 -n k8gb-ui --create-namespace -f "$PRIVATE/agent.yaml" \
-  --set-string agent.clusterID=west \
-  --set-string agent.ingress.host=west-agent.example.test --wait --timeout 5m
+  -f "$PRIVATE/west.yaml" --wait --timeout 5m
 ```
 
 The default generated ClusterRole permits cluster-wide reads, **not writes or
@@ -248,6 +342,7 @@ console:
     - id: east
       name: East
       url: https://east-agent.example.test
+      geoTags: [east]
       zones: [apps.example.test]
       namespaces: [catalog]
       bearerTokenFile: /run/sites/east/token
@@ -255,6 +350,7 @@ console:
     - id: west
       name: West
       url: https://west-agent.example.test
+      geoTags: [west]
       zones: [apps.example.test]
       namespaces: [catalog]
       bearerTokenFile: /run/sites/west/token
@@ -277,12 +373,10 @@ options still install agents in both sites.
 ```sh
 helm --kube-context "$EAST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
   --version 0.1.2 -n k8gb-ui -f "$PRIVATE/agent.yaml" -f "$PRIVATE/console.yaml" \
-  --set-string agent.clusterID=east \
-  --set-string agent.ingress.host=east-agent.example.test --wait --timeout 5m
+  -f "$PRIVATE/east.yaml" --wait --timeout 5m
 helm --kube-context "$WEST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
   --version 0.1.2 -n k8gb-ui -f "$PRIVATE/agent.yaml" -f "$PRIVATE/console.yaml" \
-  --set-string agent.clusterID=west \
-  --set-string agent.ingress.host=west-agent.example.test \
+  -f "$PRIVATE/west.yaml" \
   --set console.enabled="$CONSOLE_IN_WEST" --wait --timeout 5m
 ```
 
@@ -331,7 +425,7 @@ agent:
 ```
 
 Rerun the two upgrade commands in step 4, adding `-f "$PRIVATE/writes.yaml"`
-**after** the other values files and keeping
+**after** the shared agent/Console files, before the site override, and keeping
 `--set console.enabled="$CONSOLE_IN_WEST"` on west. A keeps Console disabled in
 west while enabling its agent writes; B enables both Console and agent writes.
 Only explicit `role: admin` bindings can write;
@@ -389,15 +483,14 @@ the write and Traefik overlays:
 helm --kube-context "$EAST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
   --version 0.1.2 -n k8gb-ui -f "$PRIVATE/agent.yaml" -f "$PRIVATE/console.yaml" \
   -f "$PRIVATE/writes.yaml" -f "$PRIVATE/traefik.yaml" \
+  -f "$PRIVATE/east.yaml" \
   --set-file webhook.caBundle="$PRIVATE/webhook-ca.b64" \
-  --set-string agent.clusterID=east \
-  --set-string agent.ingress.host=east-agent.example.test --wait --timeout 5m
+  --wait --timeout 5m
 helm --kube-context "$WEST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
   --version 0.1.2 -n k8gb-ui -f "$PRIVATE/agent.yaml" -f "$PRIVATE/console.yaml" \
   -f "$PRIVATE/writes.yaml" -f "$PRIVATE/traefik.yaml" \
+  -f "$PRIVATE/west.yaml" \
   --set-file webhook.caBundle="$PRIVATE/webhook-ca.b64" \
-  --set-string agent.clusterID=west \
-  --set-string agent.ingress.host=west-agent.example.test \
   --set console.enabled="$CONSOLE_IN_WEST" --wait --timeout 5m
 ```
 
@@ -434,6 +527,27 @@ rerun the bootstrap credential/journal commands on ordinary upgrades. Auth,
 connection and signing Secret changes require deliberate Deployment restarts.
 Never overwrite a published chart or image version. Helm rollback does not
 undo already committed application mutations or restore evicted audit entries.
+
+### Add another cluster later
+
+1. Prepare k8gb/DNS and the application namespaces in the new site, then install
+   its agent with a new stable ID, dedicated URL and distinct credentials.
+2. Mount that agent's connection credentials on **every Console site**. Add its
+   full entry (ID, label, URL, local GeoTags, zones, namespace scope and credential
+   paths) to the shared `console.clusters` list and add the corresponding Secret
+   mount. Extend non-wildcard access bindings where appropriate.
+3. Update allowed policy tags on participating agents/webhooks if the group gains
+   a GeoTag. This allowlist does not register or configure a peer k8gb controller;
+   configure k8gb and DNS separately as required by your topology.
+4. Upgrade every Console deployment with the same updated registry. The chart's
+   configuration checksum rolls Console pods when its configuration changes;
+   credential-only Secret changes still require a deliberate restart.
+5. Verify all expected sources and inventories. Existing services are not
+   automatically copied to the new site: provision their routing/backend resources
+   and explicitly select the new site when creating/applying GSLB configuration.
+
+Do not remove an unreachable site from the registry just to hide its warning;
+remove entries only when deliberately changing the intended topology.
 
 Further configuration: [Helm reference](../charts/k8gb-ui/README.md),
 [authentication](authentication.md), [mutation safety](mutations.md),

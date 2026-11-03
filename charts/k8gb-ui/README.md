@@ -39,6 +39,27 @@ one or several sites with the same explicit cluster registry and access bindings
 Each Console independently federates the per-site journals; deduplication uses
 cluster/event identity. There is no cross-cluster ConfigMap replication.
 
+`console.clusters` is the **full, explicit runtime registry**, not a list of
+locally deployed components. Each entry's `id` must match its remote
+`agent.clusterID`; `name` labels the site, `url` identifies its dedicated HTTPS
+agent, `geoTags` identifies local k8gb tags and `zones` declares expected zone
+participation. Console queries only authorized entries; agents query only their
+own Kubernetes API and never discover peers. An omitted cluster is invisible.
+DNS-zone discovery does not fill in this registry.
+
+Use common agent/Console values plus a final per-cluster overlay for
+`agent.clusterID`, `agent.ingress.host` and any local differences. Distributed
+Consoles keep the **same complete registry**, auth bindings and session key.
+Agent credential contents are distinct per site, even when Secret names match;
+each Console needs connection credentials for all agents it queries.
+`agent.geoTags` / `webhook.geoTags` allow policy tags for the group (e.g. both
+`east` and `west`), unlike each registry entry's local `geoTags`.
+
+Later `-f` files win; lists such as `console.clusters` are replaced, not merged
+by ID. See the [installation guide](../../docs/installation.md#which-values-are-shared)
+for common files, concrete east/west overrides and the
+[limits of completeness checks](../../docs/installation.md#cluster-registry-and-completeness).
+
 | Profile | Values |
 | --- | --- |
 | Console, builtin users | [builtin.yaml](examples/builtin.yaml) |

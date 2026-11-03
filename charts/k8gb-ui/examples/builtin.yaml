@@ -12,6 +12,7 @@ console:
     - id: east
       name: East
       url: https://east-agent.example.test
+      geoTags: [east]
       zones: [apps.example.test]
       namespaces: [demo]
       bearerTokenFile: /run/sites/east/token
@@ -19,6 +20,7 @@ console:
     - id: west
       name: West
       url: https://west-agent.example.test
+      geoTags: [west]
       zones: [apps.example.test]
       namespaces: [demo]
       bearerTokenFile: /run/sites/west/token

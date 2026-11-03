@@ -17,6 +17,10 @@ console:
     usersFile: /run/auth/users.yaml
     cookieKeyFile: /run/auth/session-key
     bindings: []
+  # Full explicit registry on EVERY Console; no peer discovery. Each entry's id
+  # matches the remote agent.clusterID, url targets only that agent, geoTags are
+  # local k8gb tags and zones declare expected participation. Lists are replaced
+  # by Helm overlays, not merged by id. See docs/installation.md.
   clusters: []
   # Only Secret volumes; config contains file paths, never credential values.
   secretMounts: []
@@ -34,8 +38,10 @@ agent:
   replicas: 1
   image: {repository: steemax/k8gb-ui, tag: 0.1.2-agent, pullPolicy: IfNotPresent}
   serviceAccountName: ""
+  # Unique runtime identity per cluster; must match console.clusters[].id.
   clusterID: ""
   namespaces: []
+  # Allowed policy tags across the group (e.g. [east, west]), not a peer registry.
   geoTags: []
   authSecretName: ""
   writesEnabled: false
@@ -72,6 +78,7 @@ webhook:
   # Base64 PEM CA for the certificate, with SAN <release>-webhook.<ns>.svc.
   caBundle: ""
   namespaces: []
+  # Same policy-tag allowlist as the corresponding agent.
   geoTags: []
   reconcileInterval: 10s
   resources:

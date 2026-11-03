@@ -86,6 +86,60 @@ Install an agent in **each** cluster. Console can run in one or all sites and
 connects to every agent over verified HTTPS. Start read-only, then explicitly
 enable administrator writes and, if needed, the IngressRoute webhook.
 
+### How Console knows your clusters
+
+**There is no automatic cluster discovery.** You declare the complete intended
+inventory in Helm `console.clusters` on **every Console**, regardless of which
+cluster hosts that Console. For example, this registry fragment describes two
+sites; it is not a complete installation values file:
+
+```yaml
+console:
+  clusters:
+    - id: east
+      name: East
+      url: https://east-agent.example.test
+      geoTags: [east]
+      zones: [apps.example.test]
+      namespaces: [catalog]
+      bearerTokenFile: /run/sites/east/token
+    - id: west
+      name: West
+      url: https://west-agent.example.test
+      geoTags: [west]
+      zones: [apps.example.test]
+      namespaces: [catalog]
+      bearerTokenFile: /run/sites/west/token
+```
+
+- `id` must equal that site's `agent.clusterID`; `name` is its display label.
+  IDs are operator-chosen, unique DNS labels, not kube-context names. Console
+  rejects an agent response carrying a different cluster ID.
+- `url` is that site's dedicated agent endpoint, **not** the shared GSLB UI URL.
+  Each agent reads only its own Kubernetes API; agents do not discover or poll
+  one another. The browser calls Console, which queries the authorized agents.
+- `geoTags` are the actual k8gb tags reported by this site, which may differ from
+  its ID. `agent.geoTags` has a different purpose: the allowed policy tags across
+  the site's DNS group, for example `[east, west]` on both agents.
+- `zones` declares where each site is expected to participate. For a hostname
+  in `apps.example.test`, both entries above are expected, within the user's
+  cluster/namespace scope. An unreachable agent or incomplete inventory is shown
+  as unknown; a missing Gslb is reported only after a complete inventory.
+
+**A cluster omitted from this registry is invisible, not detected as missing.**
+The registry is your declared inventory, not proof that no other clusters exist.
+Discovering served DNS zones from k8gb `DNS_ZONES` does not discover peer clusters
+or their agent URLs. See [registry fields and completeness limits](docs/installation.md#cluster-registry-and-completeness).
+
+### Shared values and per-site overrides
+
+Use common `agent.yaml` / `console.yaml` settings plus a site-specific values file:
+`east.yaml` sets `agent.clusterID: east` and its agent hostname; `west.yaml` sets
+the corresponding west values. Agents need distinct credentials even if their
+Secret names match. All distributed Consoles need the **same full registry**,
+access bindings and session key, not just their local cluster entry.
+See the [values comparison and overlay order](docs/installation.md#which-values-are-shared).
+
 Follow the [installation guide for topology A or B](docs/installation.md) to prepare
 Secrets, HTTPS endpoints and the private values files used below. It covers
 built-in users without Keycloak, OIDC, shared audit and the optional webhook.
@@ -97,15 +151,17 @@ After preparing those files, an agent installation uses the **published chart**:
 ```sh
 helm --kube-context "$EAST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
   --version 0.1.2 --namespace k8gb-ui --create-namespace \
-  -f "$PRIVATE/agent.yaml" \
-  --set-string agent.clusterID=east \
-  --set-string agent.ingress.host=east-agent.example.test \
+  -f "$PRIVATE/agent.yaml" -f "$PRIVATE/east.yaml" \
+  --wait --timeout 5m
+helm --kube-context "$WEST_CONTEXT" upgrade --install ui k8gb-ui/k8gb-ui \
+  --version 0.1.2 --namespace k8gb-ui --create-namespace \
+  -f "$PRIVATE/agent.yaml" -f "$PRIVATE/west.yaml" \
   --wait --timeout 5m
 ```
 
-Repeat for the other site with its context, cluster ID and agent hostname. Then
-choose single-site or distributed Console placement independently of enabling
-the webhook. The guide includes both agent commands and the corresponding
+These commands install agents only. Then choose single-site or distributed
+Console placement independently of enabling the webhook. The guide includes
+both agent commands and the corresponding
 Console/write/webhook upgrade steps.
 Replace all `.example.test` names with your own DNS names.
 
